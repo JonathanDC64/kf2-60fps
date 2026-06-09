@@ -1,0 +1,14 @@
+[project]
+name = "kf2-60fps"
+version = "0.1.0"
+description = "King's Field II (USA) 60 FPS speed-compensation patcher"
+requires-python = ">=3.8"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# E402: tools/tests intentionally tweak sys.path before importing the patcher.
+ignore = ["E402"]

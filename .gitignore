@@ -1,0 +1,33 @@
+# Never commit game data (copyrighted)
+*.bin
+*.cue
+*.exe
+*.iso
+*.img
+*.BIN
+*.EXE
+*.7z
+GAME.EXE
+*.bps
+*.ips
+*.xdelta
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Ghidra / RE scratch output
+ghidra_*.txt
+*.gpr
+*.rep/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
