@@ -265,3 +265,42 @@ dead-end writers above in seconds). A custom invoker that *restores* a captured 
 write also gives a non-pausing **freeze** (to test "does X drive this animation?"). Note: very
 hot addresses (written many times/frame, e.g. display-list buffers) can destabilize the emulator
 under the callback — prefer watching cooler, object-level state, and wrap the callback in `pcall`.
+
+## 9. Door animation investigation (mechanism mapped, fix deferred)
+
+**Goal:** make doors open/close at the original speed at 60 fps (they currently snap ~4× fast).
+
+**Mechanism.** Doors are handled by `FUN_80047010`, the dispatcher for **interactive world
+objects** (doors, switches, elevators…) — a different array (`~0x80191a5c`) from enemies. It's
+a **timed state machine** per object:
+
+- A per-frame **state timer** `obj[0x38]` increments `+1` each frame (`obj[0x38] = uVar5 + 1`).
+- Phases are keyed off that timer's value:
+  - `timer < 0x20` (0–31): **opening** — rotation angle `obj[0x1e] += 0x20`/frame (`@0x800482fc`),
+    so over 32 frames it reaches `0x400` (= 90°, fully open).
+  - hold.
+  - `timer ∈ [0x12c, 0x14c)` (300–331): **closing** — `obj[0x1e] -= 0x20`/frame (`@0x80048458`).
+- `obj[0x1e]` is the door's **rotation angle**, consumed via `rcos/rsin((angle) - 0x400)` and
+  `FUN_8001660c` (matrix) to swing the door geometry.
+- There are **several door-type variants** (open ramps also at the equivalents of decompile
+  lines 238/931, closes at 179/273/881), each with its own ramp + phase constants.
+
+**Why a naive ÷4 fails.** Scaling only the ramp step (`0x20 → 0x08`) makes the door move smoothly
+but the opening *phase* is still 32 frames (timer-gated), so it only covers ¼ of the 90° rotation
+and stops part-open. (Verified live: with ±0x08 the door "opens a little bit.")
+
+**Correct fix (deferred).** Stretch the whole sequence 4×, two consistent options:
+1. **Gate the state-timer**: make `obj[0x38]` increment `+1` every 4th frame (cave/self-counter
+   gate, like ATTACK/MAGIC) **and** ÷4 the ramps. Then the opening phase lasts 128 frames and the
+   ÷4 ramp reaches `0x400` exactly at the phase boundary. One gate covers all door types — but the
+   timer/handler is shared by *all* interactive objects (switches, elevators, moving platforms), so
+   it scales those too (probably desirable at 60 fps, but verify nothing timing-critical breaks).
+2. **Per-door-type phase extension**: ÷4 each ramp step **and** widen each phase window
+   (`<0x20 → <0x80`, `[0x12c,0x14c) → [0x12c,0x1ac)`, …) so each door type opens/closes over 4× the
+   frames. More edits, but scoped to doors only.
+
+**How it was found (good template for timed world state):** triple-diff **closed → open →
+auto-closed** isolated the door angle `obj[0x1e]` (the tested door's was `0x80193b72`: `0 → 960 →
+0`); then `tools/redux_watchpoint.lua` on that address pinned the writer `0x80048300` →
+`FUN_80047010`. The "changed-then-returned" filter cuts through the render/sound/timer noise that
+a plain before/after diff drowns in.
