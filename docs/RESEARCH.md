@@ -304,3 +304,36 @@ auto-closed** isolated the door angle `obj[0x1e]` (the tested door's was `0x8019
 0`); then `tools/redux_watchpoint.lua` on that address pinned the writer `0x80048300` →
 `FUN_80047010`. The "changed-then-returned" filter cuts through the render/sound/timer noise that
 a plain before/after diff drowns in.
+
+### §9 addendum — two failed live attempts + the coupled player-push
+
+Live experimentation revealed the door is more coupled than the static read suggested:
+
+- **The open code pushes the player.** While `counter < 0x15` (the open sub-phase) it does
+  `DAT_801b25f0/f8 += displacement` each frame (backs the player away from the swinging door,
+  via `FUN_8001660c`/`ApplyMatrix`/`FUN_80074840` @~`0x80048218`–`0x800482ec`). Any fix that
+  changes how long `counter < 0x15` lasts will over/under-scale this push.
+
+- **Attempt A — counter-gate cave (FAILED):** gated `obj[0x38]` to tick every Nth frame via a
+  cave with a *shared self-counter*. Two problems: (1) the self-counter is consumed by **every**
+  object hitting that code, so a given door's counter **starves** (never advances) → open phase
+  never ends → door rotates past 180° **and** the player-push runs forever (infinite slide to
+  death). (2) Even with a correct (frame-based, `0x801b2580 & 3`) gate, gating the counter makes
+  the `counter < 0x15` player-push run 4× longer → pushes the player 4× too far. **Conclusion:
+  do NOT gate the door counter.**
+
+- **Attempt B — phase-extension (PARTIAL):** ÷4 the ramps (`+0x20→+0x08`) **and** widen the
+  phase windows (`open counter<0x20 → <0x80`, `close [0x12c,0x14c) → [0x12c,0x1ac)`). This keeps
+  the counter at +1/frame so the `counter<0x15` player-push stays its original 21 frames
+  (correct). Close-window edit took effect (door over-closed into negative when open was
+  incomplete); the **open-boundary edit at `0x80048200` (`slti s1,0x20`) appeared not to extend
+  the open** — cause unconfirmed (possibly a second door-type path using the `s4` comparisons at
+  `0x80048008`/`0x80048010`, or the specific door under test using a different handler).
+
+**Recommended next pass (phase-extension, verified empirically):** apply *open-only* edits
+(`0x80048200`: `0x20→0x80`, `0x800482fc`: `+0x20→+0x08`), then **frame-watch the door counter
+`obj[0x38]` and angle `obj[0x1e]` during an open** to confirm the open phase now lasts ~128
+frames and the angle reaches `0x400`. Only once open is confirmed, mirror it for close
+(`0x80048364`: `0x14c→0x1ac`, `0x80048458`: `-0x20→-0x08`). Leave the `counter<0x15` player-push
+window (`0x8004820c`) alone. Repeat for any other door-type handler (the `s4` path). Door object
+fields: angle `obj[0x1e]`, state/timer `obj[0x38]`; tested door base `0x80193b54`.
