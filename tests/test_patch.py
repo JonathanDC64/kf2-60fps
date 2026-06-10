@@ -30,6 +30,8 @@ SIGS = {
     "swing": (0x800, P.SWING_SIG), "enemyanim": (0x900, P.ENEMYANIM_SIG),
     "enemyanim_far": (0xa00, P.ENEMYANIM_FAR_SIG),
     "turnface": (0xb00, P.TURNFACE_SIG),
+    "door_open": (0xc00, P.DOOR_OPEN_SIG), "door_openwin": (0xd00, P.DOOR_OPENWIN_SIG),
+    "door_closewin": (0xe00, P.DOOR_CLOSEWIN_SIG), "door_closeramp": (0xf00, P.DOOR_CLOSERAMP_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -54,6 +56,11 @@ def test_quarter_byte_edits():
     assert d[0x900 + 4:0x900 + 8] == P.ENEMYANIM_NEW["quarter"].to_bytes(4, "little")
     # distant (LOD) enemy anim: nop -> sra v1,v1,2
     assert d[0xa00 + 4:0xa00 + 8] == P.ENEMYANIM_FAR_NEW["quarter"].to_bytes(4, "little")
+    # doors: open ramp/trigger/window + close window/ramp scaled
+    assert d[0xc00 + P.DOOR_OPEN_RAMP_OFF] == 0x08 and d[0xc00 + P.DOOR_OPEN_TRIG_OFF] == 0x7f
+    assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x80
+    assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0xac
+    assert d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf8
 
 
 def test_half_mode():
@@ -64,6 +71,10 @@ def test_half_mode():
     assert d[0x500] == 0x78                                        # MAGIC-DELAY 60->120
     # ENEMY/NPC anim: nop -> sra v1,v1,1
     assert d[0x900 + 4:0x900 + 8] == P.ENEMYANIM_NEW["half"].to_bytes(4, "little")
+    # doors (half): trigger 0x3f, window 0x40, close 0x6c, ramps 0x10/-0x10
+    assert d[0xc00 + P.DOOR_OPEN_RAMP_OFF] == 0x10 and d[0xc00 + P.DOOR_OPEN_TRIG_OFF] == 0x3f
+    assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x40
+    assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0x6c and d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf0
 
 
 def test_cave_redirects_and_bodies():

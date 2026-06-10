@@ -182,6 +182,34 @@ MAGDELAY_SIG = bytes.fromhex("3c000234""1b80013c""f42422a0")
 MAGDELAY_OFF = 0
 MAGDELAY_NEW = {"quarter": 0xf0, "half": 0x78}
 
+# --- DOORS (FUN_80047010, the interactive-world-object state machine) -- a per-frame state
+# counter obj[0x38] drives open/hold/close phases; the swing angle obj[0x1e] ramps +/-0x20
+# per frame to 0x400 (90deg). Open lasts until the counter hits a trigger value (then it jumps
+# to the hold phase); close runs over a counter window. At 60fps the door snaps open/closed 4x
+# fast. Fix = ÷N the open+close ramp steps AND lengthen the open trigger / close window N x, so
+# the door travels the full 90deg over N x the frames. The player-push sub-phase (counter<0x15)
+# is left untouched (so the player isn't shoved N x as far). All same-size byte edits. ---
+# Open ramp + open-end trigger: lhu v0,0x1e(s2)/ori v1,0x81/sb/addiu v0,v0,0x20/sh/.../ori v0,0x1f
+DOOR_OPEN_SIG = bytes.fromhex(
+    "1e004296""81000334""f9ff43a2""20004224""1e0042a6""18000234""10002216""1f000234")
+DOOR_OPEN_RAMP_OFF = 0x0c       # addiu v0,v0,0x20  (open step) -> 0x08/0x10
+DOOR_OPEN_TRIG_OFF = 0x1c       # ori v0,zero,0x1f  (open ends at counter==trigger) -> 0x7f/0x3f
+DOOR_OPEN_RAMP = {"quarter": 0x08, "half": 0x10}
+DOOR_OPEN_TRIG = {"quarter": 0x7f, "half": 0x3f}
+# Open-block window guard: ... sra s1,v0,0x10 / slti v0,s1,0x20
+DOOR_OPENWIN_SIG = bytes.fromhex(
+    "38004296""00000000""01004324""00140200""038c0200""2000222a")
+DOOR_OPENWIN_OFF = 0x14         # slti v0,s1,0x20 -> 0x80/0x40 (keep window > trigger)
+DOOR_OPENWIN = {"quarter": 0x80, "half": 0x40}
+# Close window end: slti v0,s1,0x12c / bne / slti v0,s1,0x14c
+DOOR_CLOSEWIN_SIG = bytes.fromhex("2c01222a""5b0c4014""4c01222a")
+DOOR_CLOSEWIN_OFF = 0x08        # slti v0,s1,0x14c (low byte) -> 0xac(0x1ac)/0x6c(0x16c)
+DOOR_CLOSEWIN = {"quarter": 0xac, "half": 0x6c}
+# Close ramp: lhu v0,0x1e(s2) / nop / addiu v0,v0,-0x20 / j 0x8004b4d0
+DOOR_CLOSERAMP_SIG = bytes.fromhex("1e004296""00000000""e0ff4224""342d0108")
+DOOR_CLOSERAMP_OFF = 0x08       # addiu v0,v0,-0x20 (low byte) -> 0xf8(-0x08)/0xf0(-0x10)
+DOOR_CLOSERAMP = {"quarter": 0xf8, "half": 0xf0}
+
 TEXT_VADDR = 0x80011000
 
 
@@ -278,6 +306,25 @@ def apply_patches(data, mode):
     assert data[md + MAGDELAY_OFF] == 0x3c, "magdelay byte mismatch"
     data[md + MAGDELAY_OFF] = MAGDELAY_NEW[mode]
     print("MAGIC-DELAY @0x%X  60->%d frames" % (md + MAGDELAY_OFF, MAGDELAY_NEW[mode]))
+
+    # --- DOORS: ÷N the open/close ramps + lengthen the open trigger / close window N x ---
+    do = find_once(data, DOOR_OPEN_SIG, "door_open")
+    assert data[do + DOOR_OPEN_RAMP_OFF] == 0x20 and data[do + DOOR_OPEN_TRIG_OFF] == 0x1f, \
+        "door_open byte mismatch"
+    data[do + DOOR_OPEN_RAMP_OFF] = DOOR_OPEN_RAMP[mode]
+    data[do + DOOR_OPEN_TRIG_OFF] = DOOR_OPEN_TRIG[mode]
+    dw = find_once(data, DOOR_OPENWIN_SIG, "door_openwin")
+    assert data[dw + DOOR_OPENWIN_OFF] == 0x20, "door_openwin byte mismatch"
+    data[dw + DOOR_OPENWIN_OFF] = DOOR_OPENWIN[mode]
+    dc = find_once(data, DOOR_CLOSEWIN_SIG, "door_closewin")
+    assert data[dc + DOOR_CLOSEWIN_OFF] == 0x4c, "door_closewin byte mismatch"
+    data[dc + DOOR_CLOSEWIN_OFF] = DOOR_CLOSEWIN[mode]
+    dr = find_once(data, DOOR_CLOSERAMP_SIG, "door_closeramp")
+    assert data[dr + DOOR_CLOSERAMP_OFF] == 0xe0, "door_closeramp byte mismatch"
+    data[dr + DOOR_CLOSERAMP_OFF] = DOOR_CLOSERAMP[mode]
+    print("DOOR open ramp@0x%X trig@0x%X win@0x%X / close win@0x%X ramp@0x%X" % (
+        do + DOOR_OPEN_RAMP_OFF, do + DOOR_OPEN_TRIG_OFF, dw + DOOR_OPENWIN_OFF,
+        dc + DOOR_CLOSEWIN_OFF, dr + DOOR_CLOSERAMP_OFF))
 
 
 def make_bps(source, target):

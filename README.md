@@ -26,9 +26,10 @@ the cap).
 | Player swing animation | ÷4 (arc speed + hit-detection windows scaled together) |
 | Enemy + NPC animation | ÷4 (near **and** distant enemies + NPCs; walk/idle/attack) |
 | Enemy turning | ÷4 facing-slew (still faces you, just turns at the right speed) |
+| Doors | open/close at the correct speed (full rotation over 4× the frames) |
 
-Still in progress: water/scrolling-texture animation, menu speed, doors/world animations,
-and vertical (gravity) physics. See
+Still in progress: water/scrolling-texture animation, menu speed, and vertical (gravity)
+physics. See
 [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Quick start

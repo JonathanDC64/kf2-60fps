@@ -151,6 +151,27 @@ so the magic bar started refilling 4× too soon. Its set value `60` is multiplie
 refilling together. *(Note: MP itself does not passively regenerate in KF2 — only the
 weapon/magic charge gauges do; "magic regen" refers to that gauge.)*
 
+### DOORS — open/close timing (`FUN_80047010`)
+Doors are a **timed state machine** in `FUN_80047010` (the interactive-world-object dispatcher,
+separate from enemies). A per-frame counter `obj[0x38]` (+1/frame) drives the phases; the swing
+angle `obj[0x1e]` ramps `±0x20`/frame to `0x400` (90°). The catch (found the hard way): the
+**open phase does not end at a `slti` window boundary** — it ends when the counter hits a
+**trigger value `0x1f`**, at which point the code *sets* the counter to `0x118` (jumps to hold).
+So the fix is **5 same-size byte edits** (no cave):
+- **Open ramp** `+0x20 → +0x08` (÷4 the per-frame swing).
+- **Open trigger** `0x1f → 0x7f` (end the open after 4× the frames — *this* is the real
+  duration control, not the window guard).
+- **Open window guard** `slti 0x20 → 0x80` (keep the open block active up to the new trigger).
+- **Close window** `slti 0x14c → 0x1ac` (close runs 4× the frames).
+- **Close ramp** `−0x20 → −0x08` (÷4).
+Net: the door travels the full 90° over 4× the frames (≈2 s at 60 fps), matching the original.
+The **player-push sub-phase** (`counter < 0x15`, which shoves the player away from the swinging
+door) is deliberately **left untouched** — scaling it would push the player 4× as far.
+**Do NOT gate the counter** to slow the door: a shared self-counter gate starves multi-object
+processing (counter never advances → door over-rotates past 180° and the player slides
+infinitely), and even a correct frame-based gate over-scales the player-push. Phase-extension is
+the right tool. (Half mode: trigger `0x3f`, window `0x40`, close end `0x16c`, ramps `±0x10`.)
+
 ## 5. Automation tooling
 
 Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux)
@@ -186,11 +207,6 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   tooling.
 - **Enemy attack timing** (largely covered by the animation phase), **menu speed**
   (input repeat + animation).
-- **Doors / world animations** — *mechanism mapped, fix is multi-site (see §9).* Doors are a
-  **timed state machine** in `FUN_80047010` (the interactive-world-object dispatcher, separate
-  from the enemy update). A naive ÷4 of the open/close ramp makes the door move smoothly but
-  only travel ¼ of the way, because the open *phase length* is fixed by a per-frame state timer
-  — the timer must be stretched 4× too. Deferred pending a focused multi-edit/cave pass.
 - **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
   ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
 
@@ -266,7 +282,11 @@ write also gives a non-pausing **freeze** (to test "does X drive this animation?
 hot addresses (written many times/frame, e.g. display-list buffers) can destabilize the emulator
 under the callback — prefer watching cooler, object-level state, and wrap the callback in `pcall`.
 
-## 9. Door animation investigation (mechanism mapped, fix deferred)
+## 9. Door animation investigation (SOLVED — final fix in §4 "DOORS")
+
+> **Resolved.** The working fix (5 byte edits, no cave) is documented in §4 under **DOORS**;
+> user-confirmed in PCSX-Redux and DuckStation. The notes below are the investigation history
+> (including two dead-end live attempts) that led there — kept for future reference.
 
 **Goal:** make doors open/close at the original speed at 60 fps (they currently snap ~4× fast).
 
