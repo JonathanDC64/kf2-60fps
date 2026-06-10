@@ -134,6 +134,18 @@ SWING_CAVE = {
     "half":    [0x96020000, 0x00129043, 0x0800B606, 0x00000000],   # sra s2,s2,1
 }
 
+# --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
+# `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
+# per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
+# animations (walk/idle/attack) run 4x fast. The advance is `addu v0,v1,v0` @0x8004db60 with
+# a load-delay `nop` right before it @0x8004db5c -- replace that nop with `sra v1,v1,N` to /N
+# the step. Hit triggers use FIXED phase thresholds (not the step), so they stay correct. ---
+# @0x8004db58: lhu v0,0x18(a0) / nop / addu v0,v1,v0 / sh v0,0x18(a0) / sll v0,v0,0x10
+ENEMYANIM_SIG = bytes.fromhex(
+    "18008294""00000000""21106200""180082a4""00140200")
+ENEMYANIM_OFF = 0x04             # the load-delay nop -> sra v1,v1,N
+ENEMYANIM_NEW = {"quarter": 0x00031883, "half": 0x00031843}   # sra v1,v1,2 / sra v1,v1,1
+
 # --- MAGIC recharge DELAY: the magic delay timer 0x24f4 decrements ungated, so the magic
 # bar starts refilling 4x too soon. xN its set value `ori v0,zero,0x3c`(=60) @0x80030120
 # so it lasts as long as the (gated) attack delay. ---
@@ -216,6 +228,12 @@ def apply_patches(data, mode):
            MAGIC_CAVE[mode])
     inject("swing", SWING_SIG, SWING_PATCH_OFF, "00000296", SWING_JMP, SWING_CAVE_VADDR,
            SWING_CAVE[mode])
+
+    ea = find_once(data, ENEMYANIM_SIG, "enemyanim")
+    assert data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] == bytes(4), "enemyanim byte mismatch"
+    data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] = ENEMYANIM_NEW[mode].to_bytes(4, "little")
+    print("ENEMY-ANIM @0x%X  nop -> sra v1,v1,%d" % (
+        ea + ENEMYANIM_OFF, 2 if mode == "quarter" else 1))
 
     md = find_once(data, MAGDELAY_SIG, "magdelay")
     assert data[md + MAGDELAY_OFF] == 0x3c, "magdelay byte mismatch"

@@ -24,9 +24,11 @@ the cap).
 | Attack bar (weapon charge) | recharges ÷4 (correct attack cadence) |
 | Magic stamina gauge | fills ÷4, and its refill **delay** matches the attack bar |
 | Player swing animation | ÷4 (arc speed + hit-detection windows scaled together) |
+| Enemy + NPC animation | ÷4 (near enemies + NPCs; walk/idle/attack) |
 
-Still in progress: enemy/NPC animation, enemy attack timing, menu speed, doors/world
-animations, and vertical (gravity) physics. See [docs/RESEARCH.md](docs/RESEARCH.md).
+Still in progress: distant (LOD) enemy animation, water/scrolling-texture animation, menu
+speed, doors/world animations, and vertical (gravity) physics. See
+[docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Quick start
 

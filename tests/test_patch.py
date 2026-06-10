@@ -26,7 +26,8 @@ SIGS = {
     "cap": (0x100, P.CAP_SIG), "bob": (0x200, P.BOB_SIG), "walk": (0x300, P.WALK_SIG),
     "turn": (0x400, P.TURN_SIG), "magdelay": (0x500, P.MAGDELAY_SIG),
     "attack": (0x600, P.ATTACK_SIG), "magic": (0x700, P.MAGIC_SIG),
-    "swing": (0x800, P.SWING_SIG), "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
+    "swing": (0x800, P.SWING_SIG), "enemyanim": (0x900, P.ENEMYANIM_SIG),
+    "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
@@ -46,6 +47,8 @@ def test_quarter_byte_edits():
     assert d[0x300 + 4] == 0x83 and d[0x300 + 0x34] == 0x83        # WALK >>0xe
     assert d[0x400 + 0x0c] == 0x08 and d[0x400 + 0x28] == 0x0a     # TURN
     assert d[0x500] == 0xf0                                        # MAGIC-DELAY 60->240
+    # ENEMY/NPC anim: nop -> sra v1,v1,2
+    assert d[0x900 + 4:0x900 + 8] == P.ENEMYANIM_NEW["quarter"].to_bytes(4, "little")
 
 
 def test_half_mode():
@@ -54,6 +57,8 @@ def test_half_mode():
     assert d[0x100] == 0x02                                        # CAP 4->2
     assert d[0x300 + 4] == 0x43                                    # WALK >>0xd
     assert d[0x500] == 0x78                                        # MAGIC-DELAY 60->120
+    # ENEMY/NPC anim: nop -> sra v1,v1,1
+    assert d[0x900 + 4:0x900 + 8] == P.ENEMYANIM_NEW["half"].to_bytes(4, "little")
 
 
 def test_cave_redirects_and_bodies():

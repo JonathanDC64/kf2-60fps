@@ -104,6 +104,17 @@ consistent with the hit-detection windows (`25a8 <= 25a4 < 25a8 + s2`), which al
 so the swing is N× slower and hits still register exactly once. (Note: `0x25a4` is also the
 *special*-attack charge progress, advanced in a different branch — patched separately.)
 
+### ENEMY / NPC animation — `FUN_8004db3c`
+The shared per-object animation-phase advance: `obj[0x18] += step` (clamped `[0,0xfff]`;
+step from object data, sign stored at `obj+0x66`), called per-frame for every object in the
+update loop `FUN_800500a8`. At 60 fps all near-object animations (walk/idle/attack) run 4×
+fast. There is a load-delay `nop` at `0x8004db5c`, right before the advance `addu v0,v1,v0`
+(v1 = step); replace it with `sra v1,v1,N` to ÷N the step. Hit triggers use FIXED phase
+thresholds (not the step), so they still fire correctly — the animation just runs N× slower.
+This one instruction covers near enemies **and** NPCs.
+**LOD caveat:** *distant* enemies use a separate, simplified animation path (not this
+function) and are still 4× fast — a follow-up fix (see §6).
+
 ### MAGIC-DELAY — refill delay (`DAT_801b24f4`)
 The magic recharge has a *delay* timer that, unlike the attack delay, decrements ungated —
 so the magic bar started refilling 4× too soon. Its set value `60` is multiplied ×N
@@ -132,9 +143,13 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Enemy / NPC animation** — walk-cycle phase at `obj+0x18` (+128/frame, wraps `0xfff`);
-  needs the base-relative writer located, then a frame-gate.
-- **Enemy attack timing**, **menu speed** (input repeat + animation).
+- **Distant (LOD) enemy animation** — near enemies + NPCs are fixed (`FUN_8004db3c`, §4),
+  but far enemies animate via a separate simplified path that's still 4× fast; locate and
+  ÷N that advance too.
+- **Water / scrolling-texture animation** — likely a per-frame UV/texture-page advance,
+  separate from model animation.
+- **Enemy attack timing** (largely covered by the animation phase), **menu speed**
+  (input repeat + animation).
 - **Doors / world animations.**
 - **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
   ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
