@@ -165,6 +165,12 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   2-byte fields change — finds animation phases / timers in a struct.
 - **Live poke / watch / RAM diff** (`tools/redux_pokew.py`, `redux_watchpoint.py`,
   `redux_ramdiff.py`).
+- **Memory write-watchpoint** (`tools/redux_watchpoint.lua`): GDB `Z2`/`Z4` data watchpoints
+  do **not** fire on this build, but PCSX-Redux's native Lua `PCSX.addBreakpoint(addr,'Write',…)`
+  does. A *custom invoker* overrides the default pause, so it logs the distinct writer PCs of an
+  address **without freezing the game**, to a file. The reliable way to find "what writes X". A
+  variant that restores a captured value on each write gives a non-pausing **freeze** for "does
+  X drive this effect?" tests. (See §8 for how this was used.)
 - **Ghidra scripts** (`tools/ghidra/*.java`): xref a data address and decompile its
   referencers; decompile / disassemble a function or range. Base-relative stores
   (`sh rX,off(base)`) are invisible to an absolute-address xref, so the owning function is
@@ -172,8 +178,12 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Water / scrolling-texture animation** — likely a per-frame UV/texture-page advance,
-  separate from model animation.
+- **Water / scrolling-texture animation** — *investigated deeply, deferred (engine-limited).*
+  Goal: slow all animated/scrolling textures ÷4. Conclusion: the animation is computed
+  **inline in the per-frame GTE / display-list build**, with **no tweakable RAM scroll
+  counter** to scale — so there is no clean one-instruction lever like every other system had.
+  See §8 for the full investigation and dead ends; revisit only with GPU/display-list-level
+  tooling.
 - **Enemy attack timing** (largely covered by the animation phase), **menu speed**
   (input repeat + animation).
 - **Doors / world animations.**
@@ -196,3 +206,58 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Magic fill fn | `FUN_8002fe1c` | `0x2506 += sVar3` @ `0x80030220` |
 | Controller buffer | `0x80007572` | active-low (Up = bit `0x10` clear) |
 | Code-cave gaps | `0x8007EF80`, `0x80081078` | inter-function padding, file-verified free |
+
+## 8. Water / animated-texture investigation (deferred)
+
+**Goal:** scale *all* animated/scrolling textures (water, and any UV-scrolling surfaces) by
+÷4 so they animate at the original speed at 60 fps.
+
+**Conclusion:** unlike every other system, there is **no single RAM value or instruction** to
+scale. The texture animation is produced **inline in the per-frame GTE / display-list build**:
+each frame the renderer rebuilds the GPU primitives (vertices + texture coords) for the visible
+world, and any scroll/animation is baked into that rebuild via GTE math — not read from a
+persistent, tweakable counter. So the ÷4 techniques that worked elsewhere (scale a step, gate a
+counter, redirect one load) have nothing to attach to. Revisit only with GPU/display-list-level
+tooling (e.g. a GPU command-stream inspector, or instrumenting the OT build).
+
+**Dead ends (so a future attempt doesn't repeat them):**
+
+1. **`0x8009EDxx` "counters" → sound-voice LRU, not textures.** A cluster of 5 values
+   (stride `0x34`) ticked ~per-frame and looked like animated-texture frame indices. A
+   write-watchpoint pinned the writer to `0x80069fcc` inside **`FUN_80069dbc`** — an LRU voice
+   allocator that ages entries (`age += 1`) and calls `SpuSetNoiseVoice`. They increment because
+   the looping **water sound** ages SPU voices. Unrelated to the visual.
+
+2. **`0x8013ADDC` etc. → GPU primitive-buffer data, not a scroll.** Two values `0x34` apart
+   ticked slowly (gated, ~+0.3/frame) — looked like a stride-`0x34` animated-texture table.
+   Watchpoint pinned the writer to `0x80036230` inside **`FUN_80035ca4`** (a GTE textured-poly
+   builder). The address is just primitive data in the **display-list buffer** (`~0x8013axxx`),
+   rebuilt every frame; the "steady increment" was the camera moving a vertex coordinate. The
+   nearby `scratchpad+0x80..0x90` writes are a **GTE rotation matrix** (`gte_rtir`/`gte_stIR1`),
+   *not* a texture-V scroll (mis-read as `V = base + scroll` at first).
+
+3. **`LoadImage` (`0x80079dc8`) is NOT called per-frame.** A breakpoint on it never fired during
+   gameplay near water → animation is **not** VRAM-frame-upload based (the texture isn't swapped
+   in VRAM each frame).
+
+4. **Render-tree walk found no chokepoint.** Main per-frame loop `FUN_80014bd4` → `FUN_800422b8`
+   (HUD/render) → `FUN_80040ae4` (object/sprite render, iterates the 200-object array) /
+   `FUN_8003bfd0` (floor/world grid via `FUN_8003bb04` → `FUN_80035358`) → poly builders
+   `FUN_8003e34c` / `FUN_8003f304` / `FUN_80035ca4`. UVs are computed inline through GTE; the
+   counters touched are scattered and per-poly. No single "advance animated textures" call.
+
+5. **VRAM diff** (`/api/v1/gpu/vram/raw`, 1024×512×16bpp): most change is the two display
+   framebuffers (≈px 0–320, swapping each frame as the scene renders). A few small texture-area
+   regions change (e.g. ≈px 960–1024, py 64–128) but couldn't be tied to a CPU-side lever
+   (uploads are GPU DMA, invisible to CPU write-watchpoints).
+
+**Tooling unlocked here (the lasting win):** PCSX-Redux **GDB** `Z2`/`Z4` data watchpoints do
+**not** fire on this build, and the Web API exposes no breakpoint/Lua endpoint — but a
+**PCSX-Redux Lua `PCSX.addBreakpoint(addr,'Write',width, name, invoker)`** with a *custom invoker*
+works and, because a custom invoker overrides the default `pauseEmulator()`, it **logs the writer
+PC without pausing the game**. `tools/redux_watchpoint.lua` arms such a watchpoint and dumps the
+distinct writer PCs (+`ra`) to a file. This is the right tool for future hunts (it found both
+dead-end writers above in seconds). A custom invoker that *restores* a captured value on each
+write also gives a non-pausing **freeze** (to test "does X drive this animation?"). Note: very
+hot addresses (written many times/frame, e.g. display-list buffers) can destabilize the emulator
+under the callback — prefer watching cooler, object-level state, and wrap the callback in `pcall`.
