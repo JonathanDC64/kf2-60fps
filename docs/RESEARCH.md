@@ -172,6 +172,21 @@ processing (counter never advances → door over-rotates past 180° and the play
 infinitely), and even a correct frame-based gate over-scales the player-push. Phase-extension is
 the right tool. (Half mode: trigger `0x3f`, window `0x40`, close end `0x16c`, ramps `±0x10`.)
 
+### MENU navigation speed (`FUN_800279d8`)
+The in-game menus run their **own blocking, vblank-driven loop** (`FUN_80024f88` etc.) — the
+main game loop is paused while a menu is open, and the loop paces itself by waiting on the
+**vblank interrupt** (PC sits at the exception vector `0x80000080`), which is why frame-step and
+`VSync` breakpoints don't catch it; find it instead by **sampling the PC / reading the call
+stack** while paused (`tools/redux_where.py`). Input pacing is in `FUN_800279d8`: after a button
+is read it waits for release but **bails after 8 vblanks** (`slti v0,v0,0x8` @`0x80027a0c`); if
+the button is still held it re-processes = auto-repeat every ~8 vblanks. At 60 fps that's ~133 ms
+(4× too fast). Fix = bump `0x8 → 0x20` (32 vblanks ≈ 533 ms) for ÷4. **Single taps are
+unaffected** (the wait-loop exits immediately on release); only *held* navigation slows. One
+byte. (Half: `0x10`.) *(Found the hard way: during menu nav the SPU/sound system dominates all
+RAM changes — every diff/watchpoint candidate for the "cursor" resolved to sound code
+(`SpuVmVSetUp`, voice tables `0x8009e9xx`). The fix isn't a cursor variable at all — it's the
+input-repeat timeout in the menu loop, located by stack-sampling, not memory diffing.)*
+
 ## 5. Automation tooling
 
 Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux)
@@ -192,6 +207,9 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   address **without freezing the game**, to a file. The reliable way to find "what writes X". A
   variant that restores a captured value on each write gives a non-pausing **freeze** for "does
   X drive this effect?" tests. (See §8 for how this was used.)
+- **Stack / PC sampling** (`tools/redux_where.py`): pause and read PC + RA + the code-address
+  words on the stack — the call chain. Finds a *blocking* loop (e.g. a menu's own vblank-driven
+  loop) that frame-step/`VSync` breakpoints can't catch (see §4 MENU).
 - **Ghidra scripts** (`tools/ghidra/*.java`): xref a data address and decompile its
   referencers; decompile / disassemble a function or range. Base-relative stores
   (`sh rX,off(base)`) are invisible to an absolute-address xref, so the owning function is
@@ -206,16 +224,6 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   See §8 for the full investigation and dead ends; revisit only with GPU/display-list-level
   tooling.
 - **Enemy attack timing** (largely covered by the animation phase).
-- **Menu speed** (cursor input-repeat + menu animation) — *attempted, deferred.* During menu
-  navigation the **SPU/sound system dominates RAM changes** (cursor-move SFX), so every value
-  that diffs or watchpoint-fires resolves to sound code (`FUN_8006cad4`/`SpuVmVSetUp`, the SPU
-  voice tables at `0x8009e9xx`, writers around `0x8006c–0x80072`). The actual cursor index
-  couldn't be isolated by RAM-diff or write-watchpoint (same wall as water §8). Even a clean
-  "oscillation scan" (value goes − on down-press, + on up-press) surfaced only a sound
-  parameter. Next approach: find the **menu update/input handler statically** — trace the
-  main-loop branch taken when the menu is open (distinct from the overworld update), or find the
-  controller-buffer (`0x80007572`) read in the menu context and the key-repeat timer there. Tip:
-  aggressively exclude *all* sound-touched RAM, not just `0x8009e9xx`.
 - **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
   ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
 

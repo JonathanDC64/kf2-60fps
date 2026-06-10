@@ -210,6 +210,16 @@ DOOR_CLOSERAMP_SIG = bytes.fromhex("1e004296""00000000""e0ff4224""342d0108")
 DOOR_CLOSERAMP_OFF = 0x08       # addiu v0,v0,-0x20 (low byte) -> 0xf8(-0x08)/0xf0(-0x10)
 DOOR_CLOSERAMP = {"quarter": 0xf8, "half": 0xf0}
 
+# --- MENU input-repeat speed (FUN_800279d8) -- the menus run their own blocking, vblank-driven
+# loop. After a button is read, this routine waits for release but bails after 8 vblanks
+# (`slti v0,v0,0x8`); if you're still holding, the menu re-processes the input = auto-repeat
+# every ~8 vblanks. At 60fps that's ~4x too fast (cursor scrolls/zooms). Bump the 8 -> 0x20
+# (32 vblanks) for ÷4 (single taps stay instant; only held navigation slows). ---
+# @0x80027a00: andi v0,v0,0xffff / beq / move v0,s0 / slti v0,v0,0x8 / beq / addiu s0,s0,1
+MENU_SIG = bytes.fromhex("ffff4230""09004010""21100002""08004228""05004010""01001026")
+MENU_OFF = 0x0c                 # slti v0,v0,0x8 (low byte) -> 0x20 (÷4) / 0x10 (÷2)
+MENU_NEW = {"quarter": 0x20, "half": 0x10}
+
 TEXT_VADDR = 0x80011000
 
 
@@ -325,6 +335,11 @@ def apply_patches(data, mode):
     print("DOOR open ramp@0x%X trig@0x%X win@0x%X / close win@0x%X ramp@0x%X" % (
         do + DOOR_OPEN_RAMP_OFF, do + DOOR_OPEN_TRIG_OFF, dw + DOOR_OPENWIN_OFF,
         dc + DOOR_CLOSEWIN_OFF, dr + DOOR_CLOSERAMP_OFF))
+
+    mn = find_once(data, MENU_SIG, "menu")
+    assert data[mn + MENU_OFF] == 0x08, "menu byte mismatch"
+    data[mn + MENU_OFF] = MENU_NEW[mode]
+    print("MENU repeat @0x%X  8->%d vblanks" % (mn + MENU_OFF, MENU_NEW[mode]))
 
 
 def make_bps(source, target):

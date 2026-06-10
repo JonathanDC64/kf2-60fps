@@ -32,6 +32,7 @@ SIGS = {
     "turnface": (0xb00, P.TURNFACE_SIG),
     "door_open": (0xc00, P.DOOR_OPEN_SIG), "door_openwin": (0xd00, P.DOOR_OPENWIN_SIG),
     "door_closewin": (0xe00, P.DOOR_CLOSEWIN_SIG), "door_closeramp": (0xf00, P.DOOR_CLOSERAMP_SIG),
+    "menu": (0x1000, P.MENU_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -61,6 +62,7 @@ def test_quarter_byte_edits():
     assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x80
     assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0xac
     assert d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf8
+    assert d[0x1000 + P.MENU_OFF] == 0x20            # menu repeat 8 -> 32 vblanks
 
 
 def test_half_mode():
