@@ -215,10 +215,40 @@ DOOR_CLOSERAMP = {"quarter": 0xf8, "half": 0xf0}
 # (`slti v0,v0,0x8`); if you're still holding, the menu re-processes the input = auto-repeat
 # every ~8 vblanks. At 60fps that's ~4x too fast (cursor scrolls/zooms). Bump the 8 -> 0x20
 # (32 vblanks) for ÷4 (single taps stay instant; only held navigation slows). ---
-# @0x80027a00: andi v0,v0,0xffff / beq / move v0,s0 / slti v0,v0,0x8 / beq / addiu s0,s0,1
-MENU_SIG = bytes.fromhex("ffff4230""09004010""21100002""08004228""05004010""01001026")
-MENU_OFF = 0x0c                 # slti v0,v0,0x8 (low byte) -> 0x20 (÷4) / 0x10 (÷2)
-MENU_NEW = {"quarter": 0x20, "half": 0x10}
+# @0x80027a00: andi v0,v0,0xffff / beq / move v0,s0 / slti v0,v0,0x8 / beq / addiu s0,s0,1 /
+#              jal 0x8007910c (VSync) -- the per-iteration wait of the release/repeat loop.
+# Two edits: (1) the repeat count 0x8 -> 0x20 (÷4), and (2) like the menu-cap, redirect the
+# loop's VSync to FUN_80019614 so each iteration blocks one real vblank (raw VSync(0) doesn't
+# block under overclock, which made the repeat collapse to "too fast" in DuckStation).
+MENU_SIG = bytes.fromhex(
+    "ffff4230""09004010""21100002""08004228""05004010""01001026""43e4010c")
+MENU_OFF = 0x0c                 # slti v0,v0,0x8 (repeat count, in FUN_80019614-vblank units)
+# The menu is vblank-paced (60fps) in BOTH original and patched, so the repeat count needn't be
+# scaled -- 8 was always correct (~12fps during hold, matching unpatched). The real fix is the
+# deterministic vblank wait below (MENU_VSYNC). Quarter keeps 8 (FUN_80019614 = 1 vblank each);
+# half uses 4 since FUN_80019614 waits 2 vblanks in half mode (4*2 = 8 vblanks, same feel).
+MENU_NEW = {"quarter": 0x08, "half": 0x04}
+MENU_VSYNC_OFF = 0x18           # jal 0x8007910c (VSync) -> jal 0x80019614 (deterministic vblank)
+MENU_VSYNC_OLD = 0x0c01e443
+MENU_VSYNC_NEW = 0x0c006585
+
+# --- MENU fps cap (FUN_800270f8) -- the menus' own loop presents every iteration and only calls
+# `VSync(0)` once, which doesn't block (the BIOS VSync(0) just yields; the real frame gate is the
+# game's vblank counter `DAT_801c12ec`). So with a high CPU overclock the menu spins way past 60fps
+# (~270). The overworld cap `FUN_80019614` blocks on that counter (`while(ctr<N) VSync(0); ctr=0`)
+# and honors our CAP patch. Fix: redirect the menu's `jal VSync` to `jal FUN_80019614`, so each
+# menu present waits one vblank like the overworld. Same-size word edit (mode-independent; the
+# vblank count N comes from the already-patched CAP). ---
+# @0x800270f8: addiu sp,-0x18 / clear a0 / sw ra / jal 0x80079ba0 / sw s0 /
+#              jal 0x8007910c (VSync) / clear a0 / lui s0,0x801b / addiu s0,-0x1518
+MENUCAP_SIG = bytes.fromhex(
+    "e8ffbd27""21200000""1400bfaf""e8e6010c""1000b0af"
+    "43e4010c""21200000""1b80103c""e8ea1026")
+MENUCAP_OFF = 0x14              # jal 0x8007910c (VSync) -> jal 0x80019614 (FUN_80019614)
+MENUCAP_OLD = 0x0c01e443        # jal 0x8007910c
+MENUCAP_NEW = 0x0c006585        # jal 0x80019614
+MENUCAP_VADDR = 0x800270f8      # the MENU flush (3 byte-identical copies exist; cap ONLY this one --
+#                                 0x80035700 is the overworld present, already capped by the main loop)
 
 TEXT_VADDR = 0x80011000
 
@@ -338,8 +368,23 @@ def apply_patches(data, mode):
 
     mn = find_once(data, MENU_SIG, "menu")
     assert data[mn + MENU_OFF] == 0x08, "menu byte mismatch"
+    assert int.from_bytes(data[mn + MENU_VSYNC_OFF:mn + MENU_VSYNC_OFF + 4], "little") == \
+        MENU_VSYNC_OLD, "menu vsync byte mismatch"
     data[mn + MENU_OFF] = MENU_NEW[mode]
-    print("MENU repeat @0x%X  8->%d vblanks" % (mn + MENU_OFF, MENU_NEW[mode]))
+    data[mn + MENU_VSYNC_OFF:mn + MENU_VSYNC_OFF + 4] = MENU_VSYNC_NEW.to_bytes(4, "little")
+    print("MENU repeat @0x%X  8->%d vblanks (+ deterministic vblank wait)" % (
+        mn + MENU_OFF, MENU_NEW[mode]))
+
+    # There are 3 byte-identical copies of this flush function. ONLY the menu one
+    # (vaddr 0x800270f8) must be capped -- the others are the overworld present (0x80035700,
+    # called by FUN_800422b8 and already capped by the main loop) and 0x80061894; capping those
+    # would add a 2nd vblank wait and halve their fps. So target the menu copy by address.
+    mc = base + _bin_off(_file_off(MENUCAP_VADDR))
+    assert data[mc:mc + len(MENUCAP_SIG)] == MENUCAP_SIG, "menucap: flush not at 0x800270f8"
+    assert int.from_bytes(data[mc + MENUCAP_OFF:mc + MENUCAP_OFF + 4], "little") == MENUCAP_OLD, \
+        "menucap byte mismatch"
+    data[mc + MENUCAP_OFF:mc + MENUCAP_OFF + 4] = MENUCAP_NEW.to_bytes(4, "little")
+    print("MENU-CAP @0x%X (menu flush 0x800270f8 only; overworld flush untouched)" % (mc + MENUCAP_OFF))
 
 
 def make_bps(source, target):

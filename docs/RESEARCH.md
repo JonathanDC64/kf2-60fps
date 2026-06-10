@@ -172,20 +172,37 @@ processing (counter never advances → door over-rotates past 180° and the play
 infinitely), and even a correct frame-based gate over-scales the player-push. Phase-extension is
 the right tool. (Half mode: trigger `0x3f`, window `0x40`, close end `0x16c`, ramps `±0x10`.)
 
-### MENU navigation speed (`FUN_800279d8`)
+### MENU navigation speed + FPS cap (`FUN_800279d8`, flush `FUN_800270f8`)
 The in-game menus run their **own blocking, vblank-driven loop** (`FUN_80024f88` etc.) — the
 main game loop is paused while a menu is open, and the loop paces itself by waiting on the
 **vblank interrupt** (PC sits at the exception vector `0x80000080`), which is why frame-step and
 `VSync` breakpoints don't catch it; find it instead by **sampling the PC / reading the call
-stack** while paused (`tools/redux_where.py`). Input pacing is in `FUN_800279d8`: after a button
-is read it waits for release but **bails after 8 vblanks** (`slti v0,v0,0x8` @`0x80027a0c`); if
-the button is still held it re-processes = auto-repeat every ~8 vblanks. At 60 fps that's ~133 ms
-(4× too fast). Fix = bump `0x8 → 0x20` (32 vblanks ≈ 533 ms) for ÷4. **Single taps are
-unaffected** (the wait-loop exits immediately on release); only *held* navigation slows. One
-byte. (Half: `0x10`.) *(Found the hard way: during menu nav the SPU/sound system dominates all
-RAM changes — every diff/watchpoint candidate for the "cursor" resolved to sound code
-(`SpuVmVSetUp`, voice tables `0x8009e9xx`). The fix isn't a cursor variable at all — it's the
-input-repeat timeout in the menu loop, located by stack-sampling, not memory diffing.)*
+stack** while paused (`tools/redux_where.py`). *(Found the hard way: during menu nav the SPU/sound
+system dominates all RAM changes — every diff/watchpoint candidate for the "cursor" resolved to
+sound code (`SpuVmVSetUp`, voice tables `0x8009e9xx`). The fixes aren't a cursor variable at all.)*
+
+Two separate problems, both caused by **raw `VSync(0)` not blocking under overclock** (it only
+yields a thread; the reliable block is the vblank-**counter** gate `FUN_80019614`, see §3):
+
+1. **Menu FPS uncapped (ran at ~270 fps).** The menu's frame flush `FUN_800270f8` ends in
+   `VSync(0)` (`jal 0x8007910c` @ `0x8002710c`). Redirect it to `FUN_80019614`
+   (`jal 0x80019614`, `0c01e443 → 0c006585`) so the menu caps at the mode's fps (60 in quarter).
+   **⚠️ Critical gotcha:** there are **3 byte-identical copies** of this flush function —
+   `0x800270f8` (menu), `0x80035700` (the **overworld** present, called by `FUN_800422b8`), and
+   `0x80061894`. Only the *menu* copy may be capped. The overworld copy is already followed by the
+   main-loop `FUN_80019614` cap, so capping it too makes the overworld wait **2 vblanks = 30 fps**.
+   The patcher targets `0x800270f8` **by address** (`MENUCAP_VADDR`), not by a find-all on the
+   signature (which would hit all 3). *(This was a real regression in v11–v13.)*
+
+2. **Held-direction auto-repeat too fast.** Input pacing is in `FUN_800279d8`: after a button is
+   read it waits for release, calling a per-iteration `VSync(0)` and bailing after **8 vblanks**
+   (`slti v0,v0,0x8` @ `0x80027a0c`); if still held it re-processes = auto-repeat every ~8 vblanks.
+   The menu is vblank-paced (60 fps) in **both** original and patched, so the count `8` was always
+   correct (~12 fps "during hold", matching unpatched) — it does **not** need ÷4. The only bug is
+   that the release-wait's `VSync(0)` (@ `0x80027a18`) doesn't block under overclock, collapsing
+   the delay. Fix = redirect that `VSync(0) → FUN_80019614` (deterministic 1-vblank wait in quarter
+   mode) and **keep count = 8**. Single taps are unaffected (the wait exits on release). Half mode
+   uses count `4` because `FUN_80019614` waits 2 vblanks there (4×2 = 8 vblanks, same feel).
 
 ## 5. Automation tooling
 

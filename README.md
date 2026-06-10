@@ -27,7 +27,7 @@ the cap).
 | Enemy + NPC animation | ÷4 (near **and** distant enemies + NPCs; walk/idle/attack) |
 | Enemy turning | ÷4 facing-slew (still faces you, just turns at the right speed) |
 | Doors | open/close at the correct speed (full rotation over 4× the frames) |
-| Menu navigation | cursor auto-repeat at the right speed (taps stay instant) |
+| Menus (inventory/shops) | capped at 60 FPS and cursor auto-repeat held at the right speed (taps stay instant) |
 
 Still in progress: water/scrolling-texture animation and vertical (gravity) physics. See
 [docs/RESEARCH.md](docs/RESEARCH.md).
