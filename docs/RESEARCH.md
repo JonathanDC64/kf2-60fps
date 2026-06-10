@@ -186,7 +186,11 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   tooling.
 - **Enemy attack timing** (largely covered by the animation phase), **menu speed**
   (input repeat + animation).
-- **Doors / world animations.**
+- **Doors / world animations** — *mechanism mapped, fix is multi-site (see §9).* Doors are a
+  **timed state machine** in `FUN_80047010` (the interactive-world-object dispatcher, separate
+  from the enemy update). A naive ÷4 of the open/close ramp makes the door move smoothly but
+  only travel ¼ of the way, because the open *phase length* is fixed by a per-frame state timer
+  — the timer must be stretched 4× too. Deferred pending a focused multi-edit/cave pass.
 - **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
   ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
 
