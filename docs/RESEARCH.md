@@ -205,8 +205,17 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   counter** to scale — so there is no clean one-instruction lever like every other system had.
   See §8 for the full investigation and dead ends; revisit only with GPU/display-list-level
   tooling.
-- **Enemy attack timing** (largely covered by the animation phase), **menu speed**
-  (input repeat + animation).
+- **Enemy attack timing** (largely covered by the animation phase).
+- **Menu speed** (cursor input-repeat + menu animation) — *attempted, deferred.* During menu
+  navigation the **SPU/sound system dominates RAM changes** (cursor-move SFX), so every value
+  that diffs or watchpoint-fires resolves to sound code (`FUN_8006cad4`/`SpuVmVSetUp`, the SPU
+  voice tables at `0x8009e9xx`, writers around `0x8006c–0x80072`). The actual cursor index
+  couldn't be isolated by RAM-diff or write-watchpoint (same wall as water §8). Even a clean
+  "oscillation scan" (value goes − on down-press, + on up-press) surfaced only a sound
+  parameter. Next approach: find the **menu update/input handler statically** — trace the
+  main-loop branch taken when the menu is open (distinct from the overworld update), or find the
+  controller-buffer (`0x80007572`) read in the menu context and the key-repeat timer there. Tip:
+  aggressively exclude *all* sound-touched RAM, not just `0x8009e9xx`.
 - **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
   ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
 
