@@ -122,6 +122,28 @@ before the advance `addu v0,v1,v0` (v1 = step) — so it takes the same fix: `no
 +128/frame to +32/frame (÷4). With both `FUN_8004db3c` (near) and `FUN_8004db08` (far)
 patched, enemy model animation is correct at all distances.
 
+### ENEMY TURNING / facing slew — `FUN_8004e928`
+Every turning AI state (chase, search, reorient) funnels through one "rotate toward a target
+angle" routine. It's an *accelerating* turn: an angular velocity `obj[0x58]` ramps by
+`±accel` each frame, clamped to `±maxrate`, then the facing yaw advances
+`obj[0x42] += obj[0x58]`, with a snap-to-target when it overshoots. At 60 fps every enemy
+turns 4× fast. The yaw is **not** a per-frame snap to the player's bearing — measured live,
+an enemy's yaw moved −148 units while the bearing to the player changed only +17, confirming
+a fixed-rate slew independent of player position. (This is also why turning looked worse at a
+distance: distant enemies are usually the ones actively reorienting.)
+The per-frame advance is `lhu v0,0x58(s0)` / `lh v1,0x58(s0)` / `addu v0,v0,a1` /
+`sh v0,0x42(s0)`. We redirect the `lhu` to a cave that advances by `velocity/N` instead —
+`sra v0,v1,N` using the already-loaded **signed** copy (`v1`) so negative turn rates shift
+correctly — then rejoins before the `blez`/store. The accel ramp and snap-to-target are
+untouched, so enemies still end up facing the player; they just turn N× slower. One injection
+covers every enemy and NPC at all distances. (The angular velocity is left full-rate; only
+the position advance is scaled — the brief accel ramp is visually negligible next to the
+steady max-rate turn, like the constant-÷ approximation used elsewhere.)
+**Tooling note:** found by live-capturing a moving+turning enemy's yaw/position synced with
+the player's (GDB frame-step), ruling out the bearing-snap path, then static decompilation
+(`FUN_800500a8` → `FUN_8004ea7c` → `FUN_8004e928`). Data write-watchpoints (Z2) don't fire
+on this build, so the writer couldn't be trapped directly.
+
 ### MAGIC-DELAY — refill delay (`DAT_801b24f4`)
 The magic recharge has a *delay* timer that, unlike the attack delay, decrements ungated —
 so the magic bar started refilling 4× too soon. Its set value `60` is multiplied ×N
@@ -150,9 +172,6 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Enemy turning / rotation rate** — far enemies appear to *rotate* (turn to face the
-  player) too fast; the model animation is correct but the facing-angle slew per frame is
-  not yet scaled. Likely a separate per-frame `angle += turn_step` distinct from movement.
 - **Water / scrolling-texture animation** — likely a per-frame UV/texture-page advance,
   separate from model animation.
 - **Enemy attack timing** (largely covered by the animation phase), **menu speed**
@@ -169,6 +188,7 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Player X / Z | `0x801b25f0` / `0x801b25f8` | |
 | Player facing | `0x801b2612` | |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
+| Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |
 | Attack charge | `0x801b2502` | 0..5000 |
 | Attack delay timer | `0x801b24f3` | |
 | Magic charge | `0x801b2506` | 0..5000, full to cast |

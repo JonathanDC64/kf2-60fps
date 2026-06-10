@@ -134,6 +134,26 @@ SWING_CAVE = {
     "half":    [0x96020000, 0x00129043, 0x0800B606, 0x00000000],   # sra s2,s2,1
 }
 
+# --- ENEMY TURNING / facing slew (FUN_8004e928) -- the universal "rotate toward a target
+# angle" routine every turning AI state funnels through. An angular velocity obj[0x58] ramps
+# by +/-accel each frame (clamped to +/-maxrate), then the facing yaw advances
+# `obj[0x42] += obj[0x58]` (with snap-to-target on overshoot). At 60fps every enemy turns 4x
+# fast. Redirect the velocity load to a cave that advances by velocity/N instead -- using the
+# already-loaded SIGNED copy (v1) so negative turn rates shift correctly. The accel ramp and
+# the snap-to-target are untouched, so enemies still end up facing the player, just turning
+# N x slower. One injection covers every enemy + NPC at all distances. ---
+# @0x8004e9d8: lh a1,0x42(s0) / lhu v0,0x58(s0) / lh v1,0x58(s0) / addu v0,v0,a1 / blez v1 / sh v0,0x42
+TURNFACE_SIG = bytes.fromhex(
+    "42000586""58000296""58000386""21104500""0b006018""420002a6")
+TURNFACE_PATCH_OFF = 0x04          # the `lhu v0,0x58(s0)` (58000296) -> j cave
+TURNFACE_JMP = 0x08020438          # j 0x800810E0
+TURNFACE_CAVE_VADDR = 0x800810E0   # same 300-byte gap, past the magic+swing caves
+#   cave: nop (load-delay for v1) / sra v0,v1,(log2 N) / addu v0,v0,a1 / j 0x8004e9e8 / nop
+TURNFACE_CAVE = {
+    "quarter": [0x00000000, 0x00031083, 0x00451021, 0x08013A7A, 0x00000000],  # sra v0,v1,2
+    "half":    [0x00000000, 0x00031043, 0x00451021, 0x08013A7A, 0x00000000],  # sra v0,v1,1
+}
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -237,6 +257,8 @@ def apply_patches(data, mode):
            MAGIC_CAVE[mode])
     inject("swing", SWING_SIG, SWING_PATCH_OFF, "00000296", SWING_JMP, SWING_CAVE_VADDR,
            SWING_CAVE[mode])
+    inject("turnface", TURNFACE_SIG, TURNFACE_PATCH_OFF, "58000296", TURNFACE_JMP,
+           TURNFACE_CAVE_VADDR, TURNFACE_CAVE[mode])
 
     ea = find_once(data, ENEMYANIM_SIG, "enemyanim")
     assert data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] == bytes(4), "enemyanim byte mismatch"

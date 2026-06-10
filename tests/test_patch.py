@@ -20,6 +20,7 @@ ENEMY_CAVE_OFF = P._bin_off(P._file_off(P.CAVE_VADDR))          # 0x7ECC0
 ATK_CAVE_OFF = P._bin_off(P._file_off(P.ATK_CAVE_VADDR))
 MAG_CAVE_OFF = P._bin_off(P._file_off(P.MAG_CAVE_VADDR))
 SWING_CAVE_OFF = P._bin_off(P._file_off(P.SWING_CAVE_VADDR))
+TURNFACE_CAVE_OFF = P._bin_off(P._file_off(P.TURNFACE_CAVE_VADDR))
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
 SIGS = {
@@ -28,12 +29,13 @@ SIGS = {
     "attack": (0x600, P.ATTACK_SIG), "magic": (0x700, P.MAGIC_SIG),
     "swing": (0x800, P.SWING_SIG), "enemyanim": (0x900, P.ENEMYANIM_SIG),
     "enemyanim_far": (0xa00, P.ENEMYANIM_FAR_SIG),
+    "turnface": (0xb00, P.TURNFACE_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
 def make_fixture():
-    buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF) + 0x400)   # big enough for the highest cave
+    buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF, TURNFACE_CAVE_OFF) + 0x400)   # fit highest cave
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
@@ -71,10 +73,12 @@ def test_cave_redirects_and_bodies():
     assert d[0x600 + 0x0c:0x600 + 0x10] == P.ATTACK_JMP.to_bytes(4, "little")
     assert d[0x700 + 0x08:0x700 + 0x0c] == P.MAGIC_JMP.to_bytes(4, "little")
     assert d[0x800 + 0x08:0x800 + 0x0c] == P.SWING_JMP.to_bytes(4, "little")
+    assert d[0xb00 + 0x04:0xb00 + 0x08] == P.TURNFACE_JMP.to_bytes(4, "little")
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
                        (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
-                       (SWING_CAVE_OFF, P.SWING_CAVE["quarter"])):
+                       (SWING_CAVE_OFF, P.SWING_CAVE["quarter"]),
+                       (TURNFACE_CAVE_OFF, P.TURNFACE_CAVE["quarter"])):
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp
