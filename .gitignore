@@ -31,3 +31,7 @@ ghidra_*.txt
 .idea/
 .DS_Store
 Thumbs.db
+
+# stray crash-telemetry from tooling
+.sentry-native/
+**/.sentry-native/
