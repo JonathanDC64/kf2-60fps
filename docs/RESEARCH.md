@@ -85,6 +85,31 @@ All enemy movement funnels through `FUN_8004dbc8`, which loads per-frame velocit
 `move s7,s3` is redirected to a cave that **round-half-away ÷N**'s `vx/vz`, redoes the
 register copies, and jumps back. One injection scales every enemy.
 
+### GRAVITY / falling — cave + accel divide (player vertical update @`0x8002ee..`)
+Free-fall is N² integration: each frame `Y += velocity; velocity += 0x28` (accel = 40/frame;
+velocity is a signed halfword at `0x801b2656`, player Y at `0x801b25f4`). The **landing path**
+derives **fall damage** from `velocity²` (gated at `velocity >= 0x1e0`, the `0x8e2e0727`
+fixed-point multiply) and clamps terminal velocity at `0x200`, then snaps Y to the ground level
+the collision routine returns (`0x801e6474`). A flat ÷4 would desync those velocity-derived
+thresholds.
+
+**The trick:** keep the *velocity value* byte-identical to the original (so damage + clamps stay
+correct for free) by dividing the **accel** instead, and divide **only the position step**. The
+real-world fall rate is preserved when `F²·accel′/2ᵏ = F₀²·accel₀` → `accel′/2ᵏ = 2.5`; for
+quarter pick `accel′ = 0x0a, k = 2` (so `velocity = 60t·10 = 600t`, exactly the original
+`15t·40`). Edits: (1) byte-edit the accel immediate `0x28 → 0x0a` (`0x14` half); (2) redirect the
+velocity load `lh v1,0x2656(v1)` to a cave that arithmetic-shifts `v1 >>= 2` before the
+proposed-Y `addu s0,v1,v0`. Because the velocity value is preserved, the collision check, terminal
+clamp, fall-damage threshold, and damage amount all fire at the same real instant as the original —
+**no other edits.**
+
+> ⚠️ **R3000 load-delay gotcha:** the cave does `lh v1,…` then needs `sra v1,v1,2`, but on the
+> PSX CPU a load's result isn't available to the *next* instruction. Without a `nop` between them
+> the `sra` shifts the *stale* `v1` (the `lui` base `0x801b0000`), giving a garbage Y far below the
+> floor → the player "lands" instantly instead of falling. The original code respected this (its
+> `lh v1` wasn't consumed until an `addu` many instructions later). Any hand-written cave that
+> consumes a load result immediately must insert the load-delay `nop`.
+
 ### ATTACK-BAR — weapon charge (`DAT_801b2502`, in `FUN_8002d2a0`)
 The idle recharge (delay timer `0x24f3` countdown + charge fill) runs every frame and sits
 behind a gate `bne v0,zero,...` where `v0 = (0x265c & 0x1870)`. The cave **folds the frame
@@ -241,8 +266,10 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   See §8 for the full investigation and dead ends; revisit only with GPU/display-list-level
   tooling.
 - **Enemy attack timing** (largely covered by the animation phase).
-- **Acceleration physics** (vertical camera / gravity) — N² integration means a constant
-  ÷4 is wrong; needs a code-cave with proper rescaling. The proper bob ÷4 is in this class.
+- **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
+  rescaled with a cave if a non-cosmetic bob is wanted.
+
+*(Gravity / falling physics — the main acceleration system — is now **solved**; see §4.)*
 
 ## 7. Key addresses
 
@@ -250,6 +277,9 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | --- | --- | --- |
 | Frame cap fn | `FUN_80019614` | once-per-frame vblank wait (frame-step breakpoint) |
 | Player X / Z | `0x801b25f0` / `0x801b25f8` | |
+| Player Y (height) | `0x801b25f4` | falls = Y increases (down is +Y) |
+| Fall velocity | `0x801b2656` | signed halfword; `+0x28`/frame accel; terminal clamp `0x200` |
+| Ground level (landing) | `0x801e6474` | Y the collision routine snaps to on landing |
 | Player facing | `0x801b2612` | |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
 | Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |

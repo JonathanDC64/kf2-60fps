@@ -21,6 +21,7 @@ ATK_CAVE_OFF = P._bin_off(P._file_off(P.ATK_CAVE_VADDR))
 MAG_CAVE_OFF = P._bin_off(P._file_off(P.MAG_CAVE_VADDR))
 SWING_CAVE_OFF = P._bin_off(P._file_off(P.SWING_CAVE_VADDR))
 TURNFACE_CAVE_OFF = P._bin_off(P._file_off(P.TURNFACE_CAVE_VADDR))
+GRAV_CAVE_OFF = P._bin_off(P._file_off(P.GRAV_CAVE_VADDR))
 MENUCAP_OFF_FIX = P._bin_off(P._file_off(P.MENUCAP_VADDR))      # menu flush is patched by address
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
@@ -34,12 +35,14 @@ SIGS = {
     "door_open": (0xc00, P.DOOR_OPEN_SIG), "door_openwin": (0xd00, P.DOOR_OPENWIN_SIG),
     "door_closewin": (0xe00, P.DOOR_CLOSEWIN_SIG), "door_closeramp": (0xf00, P.DOOR_CLOSERAMP_SIG),
     "menu": (0x1000, P.MENU_SIG), "menucap": (MENUCAP_OFF_FIX, P.MENUCAP_SIG),
+    "gravity": (0x1200, P.GRAV_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
 def make_fixture():
-    buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF, TURNFACE_CAVE_OFF) + 0x400)   # fit highest cave
+    buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF, TURNFACE_CAVE_OFF,
+                        GRAV_CAVE_OFF) + 0x400)   # fit highest cave
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
@@ -63,6 +66,7 @@ def test_quarter_byte_edits():
     assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x80
     assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0xac
     assert d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf8
+    assert d[0x1200 + P.GRAV_INC_OFF] == 0x0a        # gravity accel 0x28 -> 0x0a (velocity preserved)
     assert d[0x1000 + P.MENU_OFF] == 0x08            # menu repeat stays 8 (vblank-paced)
     assert d[0x1000 + P.MENU_VSYNC_OFF:0x1000 + P.MENU_VSYNC_OFF + 4] == \
         P.MENU_VSYNC_NEW.to_bytes(4, "little")       # repeat loop -> deterministic vblank wait
@@ -82,6 +86,7 @@ def test_half_mode():
     assert d[0xc00 + P.DOOR_OPEN_RAMP_OFF] == 0x10 and d[0xc00 + P.DOOR_OPEN_TRIG_OFF] == 0x3f
     assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x40
     assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0x6c and d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf0
+    assert d[0x1200 + P.GRAV_INC_OFF] == 0x14                      # gravity accel (half)
 
 
 def test_cave_redirects_and_bodies():
@@ -92,11 +97,14 @@ def test_cave_redirects_and_bodies():
     assert d[0x700 + 0x08:0x700 + 0x0c] == P.MAGIC_JMP.to_bytes(4, "little")
     assert d[0x800 + 0x08:0x800 + 0x0c] == P.SWING_JMP.to_bytes(4, "little")
     assert d[0xb00 + 0x04:0xb00 + 0x08] == P.TURNFACE_JMP.to_bytes(4, "little")
+    assert d[0x1200 + P.GRAV_REDIR_OFF:0x1200 + P.GRAV_REDIR_OFF + 4] == \
+        P.GRAV_JMP.to_bytes(4, "little")
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
                        (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
                        (SWING_CAVE_OFF, P.SWING_CAVE["quarter"]),
-                       (TURNFACE_CAVE_OFF, P.TURNFACE_CAVE["quarter"])):
+                       (TURNFACE_CAVE_OFF, P.TURNFACE_CAVE["quarter"]),
+                       (GRAV_CAVE_OFF, P.GRAV_CAVE["quarter"])):
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp

@@ -154,6 +154,35 @@ TURNFACE_CAVE = {
     "half":    [0x00000000, 0x00031043, 0x00451021, 0x08013A7A, 0x00000000],  # sra v0,v1,1
 }
 
+# --- GRAVITY / falling physics (FUN_8002ee.. , player vertical update) ---
+# Free-fall integrates N^2: each frame does `Y += velocity; velocity += 0x28` (accel = 40/frame,
+# velocity halfword @0x801b2656). The landing path derives FALL DAMAGE from velocity^2 (gated at
+# velocity >= 0x1e0) and clamps terminal velocity (0x200). A flat divide would desync those.
+# Trick: KEEP the velocity *value* identical to the original (so damage + clamps stay correct for
+# free) by dividing the accel, and divide ONLY the position step. Real-world fall rate is preserved
+# when  F^2 * accel' / 2^k == F0^2 * accel  -> accel'/2^k = 2.5. Quarter: accel'=0x0a, k=2 (>>2);
+# velocity = 60t*10 = 600t = original 15t*40, so 0x1e0/0x200/damage all fire at the same instant.
+# Half: accel'=0x14, k=1 (>>1).
+# @0x8002eed0..ef1c.  Redirect the velocity load `lh v1,0x2656(v1)` (@0x8002eedc) to a cave that
+# reloads + arithmetic-shifts it before `addu s0,v1,v0` (the proposed-Y add), and divide the accel.
+GRAV_SIG = bytes.fromhex(
+    "0000448e""0800468e""1b80033c""56266384""20030734""1000b3af""0400428e""1400b4af"
+    "21806200""cecf000c""21280002""21884000""0e002016""00000000""1b80023c""56264294"
+    "040050ae""120042a6""28004224""1b80013c")
+GRAV_REDIR_OFF = 0x0c              # `lh v1,0x2656(v1)` (56266384) -> j cave
+GRAV_REDIR_OLD = "56266384"
+GRAV_INC_OFF = 0x48                # `addiu v0,v0,0x28` accel immediate (low byte) -> 0x0a / 0x14
+GRAV_INC_NEW = {"quarter": 0x0a, "half": 0x14}
+GRAV_JMP = 0x08020440              # j 0x80081100
+GRAV_CAVE_VADDR = 0x80081100       # same 300-byte gap, past magic+swing+turnface caves
+#   cave: lui v1,0x801b / lh v1,0x2656(v1) / nop (R3000 LOAD DELAY) / sra v1,v1,(log2 N)
+#         / j 0x8002eee4 / nop.  The nop after lh is REQUIRED: on the R3000 the loaded value is
+#         not available to the next instruction, so sra would shift the stale v1 without it.
+GRAV_CAVE = {
+    "quarter": [0x3c03801b, 0x84632656, 0x00000000, 0x00031883, 0x0800bbb9, 0x00000000],  # sra,2
+    "half":    [0x3c03801b, 0x84632656, 0x00000000, 0x00031843, 0x0800bbb9, 0x00000000],  # sra,1
+}
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -327,6 +356,21 @@ def apply_patches(data, mode):
            SWING_CAVE[mode])
     inject("turnface", TURNFACE_SIG, TURNFACE_PATCH_OFF, "58000296", TURNFACE_JMP,
            TURNFACE_CAVE_VADDR, TURNFACE_CAVE[mode])
+
+    # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
+    # (both sites still original at find time), then both edits applied -- so no re-find needed.
+    gi = find_once(data, GRAV_SIG, "gravity")
+    assert data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] == bytes.fromhex(GRAV_REDIR_OLD), \
+        "gravity redirect byte mismatch"
+    assert data[gi + GRAV_INC_OFF] == 0x28, "gravity accel byte mismatch"
+    gcbin = base + _bin_off(_file_off(GRAV_CAVE_VADDR))
+    assert all(x == 0 for x in data[gcbin:gcbin + 4 * len(GRAV_CAVE[mode])]), "gravity cave not free"
+    data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] = GRAV_JMP.to_bytes(4, "little")
+    data[gi + GRAV_INC_OFF] = GRAV_INC_NEW[mode]
+    for k, word in enumerate(GRAV_CAVE[mode]):
+        data[gcbin + 4 * k:gcbin + 4 * k + 4] = word.to_bytes(4, "little")
+    print("GRAVITY    @0x%X redirect + accel 0x28->0x%02x -> cave @bin0x%X (vaddr 0x%X)" % (
+        gi + GRAV_REDIR_OFF, GRAV_INC_NEW[mode], gcbin, GRAV_CAVE_VADDR))
 
     ea = find_once(data, ENEMYANIM_SIG, "enemyanim")
     assert data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] == bytes(4), "enemyanim byte mismatch"

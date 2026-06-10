@@ -28,9 +28,10 @@ the cap).
 | Enemy turning | ÷4 facing-slew (still faces you, just turns at the right speed) |
 | Doors | open/close at the correct speed (full rotation over 4× the frames) |
 | Menus (inventory/shops) | capped at 60 FPS and cursor auto-repeat held at the right speed (taps stay instant) |
+| Gravity / falling | falls at the original speed (N² integration rescaled; fall damage preserved) |
 
-Still in progress: water/scrolling-texture animation and vertical (gravity) physics. See
-[docs/RESEARCH.md](docs/RESEARCH.md).
+Still in progress: water/scrolling-texture animation (engine-limited — see
+[docs/RESEARCH.md](docs/RESEARCH.md)).
 
 ## Quick start
 
