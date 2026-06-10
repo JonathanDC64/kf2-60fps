@@ -112,8 +112,15 @@ fast. There is a load-delay `nop` at `0x8004db5c`, right before the advance `add
 (v1 = step); replace it with `sra v1,v1,N` to ÷N the step. Hit triggers use FIXED phase
 thresholds (not the step), so they still fire correctly — the animation just runs N× slower.
 This one instruction covers near enemies **and** NPCs.
-**LOD caveat:** *distant* enemies use a separate, simplified animation path (not this
-function) and are still 4× fast — a follow-up fix (see §6).
+
+### DISTANT (LOD) enemy animation — `FUN_8004db08`
+*Distant* enemies (`obj[6]==2`) animate through a separate, simplified sibling of
+`FUN_8004db3c`: `obj[0x18] = (obj[0x18] + step) & 0xfff` (this one *wraps* at `0xfff`
+rather than clamping). It has the same shape — a load-delay `nop` at `0x8004db28`, right
+before the advance `addu v0,v1,v0` (v1 = step) — so it takes the same fix: `nop` →
+`sra v1,v1,N`. Frame-stepping a far object's phase confirmed the advance dropped from
++128/frame to +32/frame (÷4). With both `FUN_8004db3c` (near) and `FUN_8004db08` (far)
+patched, enemy model animation is correct at all distances.
 
 ### MAGIC-DELAY — refill delay (`DAT_801b24f4`)
 The magic recharge has a *delay* timer that, unlike the attack delay, decrements ungated —
@@ -143,9 +150,9 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Distant (LOD) enemy animation** — near enemies + NPCs are fixed (`FUN_8004db3c`, §4),
-  but far enemies animate via a separate simplified path that's still 4× fast; locate and
-  ÷N that advance too.
+- **Enemy turning / rotation rate** — far enemies appear to *rotate* (turn to face the
+  player) too fast; the model animation is correct but the facing-angle slew per frame is
+  not yet scaled. Likely a separate per-frame `angle += turn_step` distinct from movement.
 - **Water / scrolling-texture animation** — likely a per-frame UV/texture-page advance,
   separate from model animation.
 - **Enemy attack timing** (largely covered by the animation phase), **menu speed**

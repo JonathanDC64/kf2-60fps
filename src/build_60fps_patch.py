@@ -146,6 +146,15 @@ ENEMYANIM_SIG = bytes.fromhex(
 ENEMYANIM_OFF = 0x04             # the load-delay nop -> sra v1,v1,N
 ENEMYANIM_NEW = {"quarter": 0x00031883, "half": 0x00031843}   # sra v1,v1,2 / sra v1,v1,1
 
+# --- DISTANT (LOD) enemy animation (FUN_8004db08) -- a sibling of FUN_8004db3c used for
+# obj[6]==2 (far/simplified) enemies: `obj[0x18] = (obj[0x18] + step) & 0xfff`. Same shape,
+# same fix: the load-delay nop @0x8004db28 (before `addu v0,v1,v0`) -> sra v1,v1,N. ---
+# @0x8004db24: lhu v0,0x18(a0) / nop / addu v0,v1,v0 / andi v0,v0,0xfff / jr ra
+ENEMYANIM_FAR_SIG = bytes.fromhex(
+    "18008294""00000000""21106200""ff0f4230""0800e003")
+ENEMYANIM_FAR_OFF = 0x04
+ENEMYANIM_FAR_NEW = {"quarter": 0x00031883, "half": 0x00031843}
+
 # --- MAGIC recharge DELAY: the magic delay timer 0x24f4 decrements ungated, so the magic
 # bar starts refilling 4x too soon. xN its set value `ori v0,zero,0x3c`(=60) @0x80030120
 # so it lasts as long as the (gated) attack delay. ---
@@ -234,6 +243,14 @@ def apply_patches(data, mode):
     data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] = ENEMYANIM_NEW[mode].to_bytes(4, "little")
     print("ENEMY-ANIM @0x%X  nop -> sra v1,v1,%d" % (
         ea + ENEMYANIM_OFF, 2 if mode == "quarter" else 1))
+
+    ef = find_once(data, ENEMYANIM_FAR_SIG, "enemyanim_far")
+    assert data[ef + ENEMYANIM_FAR_OFF:ef + ENEMYANIM_FAR_OFF + 4] == bytes(4), \
+        "enemyanim_far byte mismatch"
+    data[ef + ENEMYANIM_FAR_OFF:ef + ENEMYANIM_FAR_OFF + 4] = \
+        ENEMYANIM_FAR_NEW[mode].to_bytes(4, "little")
+    print("ENEMY-ANIM-FAR @0x%X  nop -> sra v1,v1,%d" % (
+        ef + ENEMYANIM_FAR_OFF, 2 if mode == "quarter" else 1))
 
     md = find_once(data, MAGDELAY_SIG, "magdelay")
     assert data[md + MAGDELAY_OFF] == 0x3c, "magdelay byte mismatch"

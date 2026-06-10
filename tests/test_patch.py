@@ -27,6 +27,7 @@ SIGS = {
     "turn": (0x400, P.TURN_SIG), "magdelay": (0x500, P.MAGDELAY_SIG),
     "attack": (0x600, P.ATTACK_SIG), "magic": (0x700, P.MAGIC_SIG),
     "swing": (0x800, P.SWING_SIG), "enemyanim": (0x900, P.ENEMYANIM_SIG),
+    "enemyanim_far": (0xa00, P.ENEMYANIM_FAR_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -49,6 +50,8 @@ def test_quarter_byte_edits():
     assert d[0x500] == 0xf0                                        # MAGIC-DELAY 60->240
     # ENEMY/NPC anim: nop -> sra v1,v1,2
     assert d[0x900 + 4:0x900 + 8] == P.ENEMYANIM_NEW["quarter"].to_bytes(4, "little")
+    # distant (LOD) enemy anim: nop -> sra v1,v1,2
+    assert d[0xa00 + 4:0xa00 + 8] == P.ENEMYANIM_FAR_NEW["quarter"].to_bytes(4, "little")
 
 
 def test_half_mode():
