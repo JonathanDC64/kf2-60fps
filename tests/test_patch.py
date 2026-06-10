@@ -19,18 +19,19 @@ ENEMY_OFF = P._bin_off(P._file_off(P.ENEMY_JSIG_VADDR))          # 0x46510
 ENEMY_CAVE_OFF = P._bin_off(P._file_off(P.CAVE_VADDR))          # 0x7ECC0
 ATK_CAVE_OFF = P._bin_off(P._file_off(P.ATK_CAVE_VADDR))
 MAG_CAVE_OFF = P._bin_off(P._file_off(P.MAG_CAVE_VADDR))
+SWING_CAVE_OFF = P._bin_off(P._file_off(P.SWING_CAVE_VADDR))
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
 SIGS = {
     "cap": (0x100, P.CAP_SIG), "bob": (0x200, P.BOB_SIG), "walk": (0x300, P.WALK_SIG),
     "turn": (0x400, P.TURN_SIG), "magdelay": (0x500, P.MAGDELAY_SIG),
     "attack": (0x600, P.ATTACK_SIG), "magic": (0x700, P.MAGIC_SIG),
-    "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
+    "swing": (0x800, P.SWING_SIG), "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
 def make_fixture():
-    buf = bytearray(MAG_CAVE_OFF + 0x400)        # big enough for the highest cave
+    buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF) + 0x400)   # big enough for the highest cave
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
@@ -61,9 +62,11 @@ def test_cave_redirects_and_bodies():
     assert d[ENEMY_OFF + 8:ENEMY_OFF + 12] == P.ENEMY_JMP.to_bytes(4, "little")
     assert d[0x600 + 0x0c:0x600 + 0x10] == P.ATTACK_JMP.to_bytes(4, "little")
     assert d[0x700 + 0x08:0x700 + 0x0c] == P.MAGIC_JMP.to_bytes(4, "little")
+    assert d[0x800 + 0x08:0x800 + 0x0c] == P.SWING_JMP.to_bytes(4, "little")
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
-                       (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"])):
+                       (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
+                       (SWING_CAVE_OFF, P.SWING_CAVE["quarter"])):
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp

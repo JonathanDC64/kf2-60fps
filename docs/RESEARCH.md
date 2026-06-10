@@ -94,6 +94,16 @@ clock into that gate** so the whole recharge (delay + fill) runs only every Nth 
 Filled by `0x2506 += sVar3` per frame in `FUN_8002fe1c`. The game clock reads unreliably
 here, so the cave uses a **self-counter** and gates the fill every Nth call.
 
+### PLAYER SWING animation — cave (`FUN_8002d2a0`)
+A normal melee swing advances the arc `DAT_801b25a4 += s2` per frame (s2 = weapon
+swing-speed `weapon[0x1c]`/`[0x24]`) until it reaches `0xfff`, then ends. At 60 fps the
+arc completes 4× too fast. The advance instruction's delay slot is a branch (can't redirect
+there), so we redirect the arc load `lhu v0,0x0(s0)` (@`0x8002d814`, safe delay slot) to a
+cave that re-loads the arc and `sra`'s **s2 ÷N**. Scaling s2 (not the arc directly) keeps it
+consistent with the hit-detection windows (`25a8 <= 25a4 < 25a8 + s2`), which also use s2 —
+so the swing is N× slower and hits still register exactly once. (Note: `0x25a4` is also the
+*special*-attack charge progress, advanced in a different branch — patched separately.)
+
 ### MAGIC-DELAY — refill delay (`DAT_801b24f4`)
 The magic recharge has a *delay* timer that, unlike the attack delay, decrements ungated —
 so the magic bar started refilling 4× too soon. Its set value `60` is multiplied ×N
@@ -122,8 +132,6 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Player swing animation** (visible blade arc, normal melee) — separate from the attack
-  bar; driver not yet pinned down (`0x25a4` is the *special-attack* charge progress only).
 - **Enemy / NPC animation** — walk-cycle phase at `obj+0x18` (+128/frame, wraps `0xfff`);
   needs the base-relative writer located, then a frame-gate.
 - **Enemy attack timing**, **menu speed** (input repeat + animation).

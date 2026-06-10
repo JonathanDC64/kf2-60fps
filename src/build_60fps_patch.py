@@ -116,6 +116,24 @@ MAGIC_CAVE = {
                 0x14800002, 0x00000000, 0x00621821, 0x0800C089, 0x00000000],
 }
 
+# --- PLAYER SWING animation (FUN_8002d2a0). A normal melee swing advances the arc
+# `DAT_801b25a4 += s2` per frame (s2 = uVar2 = weapon swing-speed, loaded from
+# weapon[0x1c]/[0x24]); the arc runs 0..0xfff then ends. At 60fps it completes 4x too fast.
+# We redirect `lhu v0,0x0(s0)` (@0x8002d814; its delay slot `lui v1,0x801b` is safe) to a
+# cave that re-loads the arc and /N's s2 -- scaling the advance AND the hit-detection
+# windows together (both use s2), so the swing is /N slower and hits still register. ---
+# @0x8002d80c: lui s0 / addiu s0,0x25a4 / lhu v0,0(s0) / lui v1 / lbu v1,0x25ae(v1)
+SWING_SIG = bytes.fromhex(
+    "1b80103c""a4251026""00000296""1b80033c""ae256390")
+SWING_PATCH_OFF = 0x08          # the `lhu v0,0x0(s0)` (00000296) -> j cave
+SWING_JMP = 0x08020430          # j 0x800810C0
+SWING_CAVE_VADDR = 0x800810C0   # in the same 300-byte gap, past the magic cave + its counter
+#   cave: lhu v0,0x0(s0) / sra s2,s2,(log2 N) / j 0x8002d81c / nop
+SWING_CAVE = {
+    "quarter": [0x96020000, 0x00129083, 0x0800B606, 0x00000000],   # sra s2,s2,2
+    "half":    [0x96020000, 0x00129043, 0x0800B606, 0x00000000],   # sra s2,s2,1
+}
+
 # --- MAGIC recharge DELAY: the magic delay timer 0x24f4 decrements ungated, so the magic
 # bar starts refilling 4x too soon. xN its set value `ori v0,zero,0x3c`(=60) @0x80030120
 # so it lasts as long as the (gated) attack delay. ---
@@ -196,6 +214,8 @@ def apply_patches(data, mode):
            ATTACK_CAVE[mode])
     inject("magic", MAGIC_SIG, MAGIC_PATCH_OFF, "21186200", MAGIC_JMP, MAG_CAVE_VADDR,
            MAGIC_CAVE[mode])
+    inject("swing", SWING_SIG, SWING_PATCH_OFF, "00000296", SWING_JMP, SWING_CAVE_VADDR,
+           SWING_CAVE[mode])
 
     md = find_once(data, MAGDELAY_SIG, "magdelay")
     assert data[md + MAGDELAY_OFF] == 0x3c, "magdelay byte mismatch"
