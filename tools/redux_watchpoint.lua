@@ -7,8 +7,8 @@
 -- paste this whole file, press Enter / Execute. Then play for a few seconds.
 -- Results -> wp_hit.txt (distinct "pc ra hits").
 
-local ADDR  = 0x801aeaf9   -- F9 ramp byte (+/-0x14/frame in appear/disappear) -- find the updater
-local WIDTH = 1            -- bytes
+local ADDR  = 0x801929a6   -- item-pickup spin rotation angle (climbs steadily, wraps) -- find writer
+local WIDTH = 2            -- bytes
 local MAXPC = 16           -- stop after this many distinct writer PCs
 local OUT   = [[C:\dev\projects\kingsfield2-recomp\KF2Recomp\wp_hit.txt]]
 

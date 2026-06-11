@@ -158,6 +158,19 @@ hold init `0x0F → 0x3C`. `0x64` divides evenly by the new step so `F9` still l
 change). *(Half mode: step `0x0a`, hold `0x1e`.)* *(Found via DuckStation's memory viewer — the
 state bytes at `0x801aeaf5..f9` — after CPU-side diffs drowned in enemy/NPC/sound/render noise.)*
 
+### ITEM PICKUP animation — sub-loop steps (`FUN_8005d..` @`0x8005d…`)
+Picking up an item runs a self-contained **display sub-loop** (the main game loop is paused) that
+renders via `FUN_800422b8` — so it's frame-capped at 60 fps and every per-frame step runs 4× too
+fast. Four 16-bit immediate steps, all ÷N (item struct: angle at `+0x26` = `0x801929a6`):
+- **move-to-center**: `s0 += 0x200`/frame, lerp `0 → 0x1000` (`@0x8005df5c`) → `0x80`
+- **steady spin**: `angle += 0x40`/frame (`@0x8005dfc4`) → `0x10`
+- **cancel/take fast-spin**: `angle += 0x100`/frame (`@0x8005e184`) → `0x40`
+- **move-out / return**: `s0 += -0x200`/frame, lerp `0x1000 → 0` (`@0x8005e26c`) → `-0x80`
+
+`0x1000` divides evenly by the new steps so the lerps still land exactly on the endpoints. Five
+same-size edits (one byte for the spin, three 16-bit immediates). *(Found by memory-viewer
+spotting the angle `0x801929a6`, then a write-watchpoint → the sub-loop.)*
+
 ### ATTACK-BAR — weapon charge (`DAT_801b2502`, in `FUN_8002d2a0`)
 The idle recharge (delay timer `0x24f3` countdown + charge fill) runs every frame and sits
 behind a gate `bne v0,zero,...` where `v0 = (0x265c & 0x1870)`. The cave **folds the frame
@@ -325,6 +338,7 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Player facing | `0x801b2612` | |
 | Water CLUT scroll pos | `0x801aeb20` | 0–31 row offset; engine `FUN_8003529x`, VRAM CLUT (1008,96) |
 | Notification msg state | `0x801aeaf7/f8/f9` | phase / hold timer / ramp; updater `@0x80042xxx` |
+| Item-display spin angle | `0x801929a6` | item struct `+0x26`; pickup sub-loop `@0x8005d..` |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
 | Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |
 | Swing animation arc | `0x801b25a4` | player attack-swing angle; `+= s2`/frame to `0xfff`; speed `s2` from weapon `[0x1c]`/`[0x24]`; fn `FUN_8002d2a0`, hit window base `0x801b25a8` |

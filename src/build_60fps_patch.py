@@ -249,6 +249,35 @@ MSG_DISAPPEAR_OFF = 0x0c       # `addiu v0,v0,0xec` (= -0x14) step (F9 ramp down
 MSG_DISAPPEAR_OLD = 0xec
 MSG_DISAPPEAR_NEW = {"quarter": 0xfb, "half": 0xf6}   # -5 (quarter), -10 (half)
 
+# --- ITEM PICKUP spin (FUN_8005d.. item-display sub-loop @0x8005dfc4) ---
+# When you pick up an item it spins its 3D model in the center of the screen. The sub-loop renders
+# via FUN_800422b8 (frame-capped at 60fps), and advances the rotation angle (item struct +0x26 =
+# 0x801929a6) by `addiu v0,v0,0x40` (+0x40/frame). At 60fps that's 4x the original 15fps spin.
+# One byte edit: step 0x40 -> 0x10 (÷4). (The cancel "faster spin" uses the same writer, so it
+# scales with it.)  @0x8005dfb4: lw v1,0x80(sp) / lhu v0,0x26(v1) / addiu v0,v0,0x40 / sh v0,0x26.
+ITEMSPIN_SIG = bytes.fromhex(
+    "8000a38f""00000000""26006294""21902002""40004224""9256000c""260062a4")
+ITEMSPIN_OFF = 0x10            # `addiu v0,v0,0x40` step immediate (low byte) -> /N
+ITEMSPIN_OLD = 0x40
+ITEMSPIN_NEW = {"quarter": 0x10, "half": 0x20}
+
+# The same item-pickup sub-loop has 3 more per-frame steps (16-bit immediates) -- all /N:
+#   move-to-center   @0x8005df5c  addiu s0,s0,0x200   (s0 lerps 0->0x1000)
+#   cancel/take fast-spin @0x8005e184  addiu v0,v0,0x100  (4x the steady spin)
+#   move-out/return  @0x8005e26c  addiu s0,s0,-0x200  (s0 lerps 0x1000->0)
+ITEM_IMM_EDITS = (
+    # (name, sig, off, old_u16, {quarter, half})
+    ("item-movein",
+     bytes.fromhex("21300002""8000a38f""00021026""5c5c000c""0e0062a4"), 0x08, 0x0200,
+     {"quarter": 0x0080, "half": 0x0100}),
+    ("item-fastspin",
+     bytes.fromhex("26006294""feff0526""00014224""ff0f4230""ae08010c"), 0x08, 0x0100,
+     {"quarter": 0x0040, "half": 0x0080}),
+    ("item-moveout",
+     bytes.fromhex("21284002""8000a38f""00fe1026""ae08010c""0e0062a4"), 0x08, 0xfe00,
+     {"quarter": 0xff80, "half": 0xff00}),   # -0x200 -> -0x80 / -0x100
+)
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -510,6 +539,18 @@ def apply_patches(data, mode):
         assert data[idx + off] == old, "%s byte mismatch" % name
         data[idx + off] = new
         print("MSG %-13s @0x%X  0x%02x -> 0x%02x" % (name, idx + off, old, new))
+
+    # ITEM PICKUP spin speed: scale the rotation step.
+    isp = find_once(data, ITEMSPIN_SIG, "itemspin")
+    assert data[isp + ITEMSPIN_OFF] == ITEMSPIN_OLD, "itemspin byte mismatch"
+    data[isp + ITEMSPIN_OFF] = ITEMSPIN_NEW[mode]
+    print("ITEM-SPIN @0x%X  step 0x40 -> 0x%02x" % (isp + ITEMSPIN_OFF, ITEMSPIN_NEW[mode]))
+    for name, sig, off, old_u16, new in ITEM_IMM_EDITS:
+        idx = find_once(data, sig, name)
+        assert int.from_bytes(data[idx + off:idx + off + 2], "little") == old_u16, \
+            "%s imm mismatch" % name
+        data[idx + off:idx + off + 2] = new[mode].to_bytes(2, "little")
+        print("%-14s @0x%X  0x%04x -> 0x%04x" % (name, idx + off, old_u16, new[mode]))
 
 
 def make_bps(source, target):

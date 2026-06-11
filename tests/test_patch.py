@@ -39,7 +39,10 @@ SIGS = {
     "menu": (0x1000, P.MENU_SIG), "menucap": (MENUCAP_OFF_FIX, P.MENUCAP_SIG),
     "gravity": (0x1200, P.GRAV_SIG), "fireanim": (0x1300, P.FIREANIM_SIG),
     "msg_hold": (0x1500, P.MSG_HOLD_SIG), "msg_appear": (0x1600, P.MSG_APPEAR_SIG),
-    "msg_disappear": (0x1700, P.MSG_DISAPPEAR_SIG),
+    "msg_disappear": (0x1700, P.MSG_DISAPPEAR_SIG), "itemspin": (0x1800, P.ITEMSPIN_SIG),
+    "item-movein": (0x1900, P.ITEM_IMM_EDITS[0][1]),
+    "item-fastspin": (0x1a00, P.ITEM_IMM_EDITS[1][1]),
+    "item-moveout": (0x1b00, P.ITEM_IMM_EDITS[2][1]),
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
@@ -75,6 +78,11 @@ def test_quarter_byte_edits():
     assert d[0x1500 + P.MSG_HOLD_OFF] == 0x3c        # notification hold 0x0f -> 0x3c (x4)
     assert d[0x1600 + P.MSG_APPEAR_OFF] == 0x05      # notification appear step 0x14 -> 0x05
     assert d[0x1700 + P.MSG_DISAPPEAR_OFF] == 0xfb   # notification disappear step -0x14 -> -0x05
+    assert d[0x1800 + P.ITEMSPIN_OFF] == 0x10        # item pickup spin step 0x40 -> 0x10 (÷4)
+    for fix_i, fix_off in ((0x1900, 0x0080), (0x1a00, 0x0040), (0x1b00, 0xff80)):
+        e = P.ITEM_IMM_EDITS[(0x1900, 0x1a00, 0x1b00).index(fix_i)]
+        got = int.from_bytes(d[fix_i + e[2]:fix_i + e[2] + 2], "little")
+        assert got == e[4]["quarter"] == fix_off    # item move-in/fast-spin/move-out (÷4)
     assert d[0x1000 + P.MENU_OFF] == 0x08            # menu repeat stays 8 (vblank-paced)
     assert d[0x1000 + P.MENU_VSYNC_OFF:0x1000 + P.MENU_VSYNC_OFF + 4] == \
         P.MENU_VSYNC_NEW.to_bytes(4, "little")       # repeat loop -> deterministic vblank wait
@@ -98,6 +106,7 @@ def test_half_mode():
     assert d[0x1500 + P.MSG_HOLD_OFF] == 0x1e                      # notification hold (half x2)
     assert d[0x1600 + P.MSG_APPEAR_OFF] == 0x0a                    # notification appear step (half)
     assert d[0x1700 + P.MSG_DISAPPEAR_OFF] == 0xf6                 # notification disappear (half)
+    assert d[0x1800 + P.ITEMSPIN_OFF] == 0x20                      # item pickup spin step (half)
 
 
 def test_cave_redirects_and_bodies():
