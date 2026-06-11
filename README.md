@@ -31,6 +31,7 @@ the cap).
 | Gravity / falling | falls at the original speed (N² integration rescaled; fall damage preserved) |
 | Animated sprites (fire/flames) | texture-frame cycling ÷4 (billboard flames animate at the right speed) |
 | Water / scrolling textures | CLUT scroll ÷4 (water shimmer animates at the right speed) |
+| Notification messages | appear/hold/fade ÷4 (bottom-screen text stays readable, not a flash) |
 
 Optional/cosmetic only: a non-cosmetic head-bob (currently disabled). See
 [docs/RESEARCH.md](docs/RESEARCH.md) for the full reverse-engineering write-up.

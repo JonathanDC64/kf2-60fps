@@ -38,6 +38,8 @@ SIGS = {
     "door_closewin": (0xe00, P.DOOR_CLOSEWIN_SIG), "door_closeramp": (0xf00, P.DOOR_CLOSERAMP_SIG),
     "menu": (0x1000, P.MENU_SIG), "menucap": (MENUCAP_OFF_FIX, P.MENUCAP_SIG),
     "gravity": (0x1200, P.GRAV_SIG), "fireanim": (0x1300, P.FIREANIM_SIG),
+    "msg_hold": (0x1500, P.MSG_HOLD_SIG), "msg_appear": (0x1600, P.MSG_APPEAR_SIG),
+    "msg_disappear": (0x1700, P.MSG_DISAPPEAR_SIG),
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
@@ -70,6 +72,9 @@ def test_quarter_byte_edits():
     assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0xac
     assert d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf8
     assert d[0x1200 + P.GRAV_INC_OFF] == 0x0a        # gravity accel 0x28 -> 0x0a (velocity preserved)
+    assert d[0x1500 + P.MSG_HOLD_OFF] == 0x3c        # notification hold 0x0f -> 0x3c (x4)
+    assert d[0x1600 + P.MSG_APPEAR_OFF] == 0x05      # notification appear step 0x14 -> 0x05
+    assert d[0x1700 + P.MSG_DISAPPEAR_OFF] == 0xfb   # notification disappear step -0x14 -> -0x05
     assert d[0x1000 + P.MENU_OFF] == 0x08            # menu repeat stays 8 (vblank-paced)
     assert d[0x1000 + P.MENU_VSYNC_OFF:0x1000 + P.MENU_VSYNC_OFF + 4] == \
         P.MENU_VSYNC_NEW.to_bytes(4, "little")       # repeat loop -> deterministic vblank wait
@@ -90,6 +95,9 @@ def test_half_mode():
     assert d[0xd00 + P.DOOR_OPENWIN_OFF] == 0x40
     assert d[0xe00 + P.DOOR_CLOSEWIN_OFF] == 0x6c and d[0xf00 + P.DOOR_CLOSERAMP_OFF] == 0xf0
     assert d[0x1200 + P.GRAV_INC_OFF] == 0x14                      # gravity accel (half)
+    assert d[0x1500 + P.MSG_HOLD_OFF] == 0x1e                      # notification hold (half x2)
+    assert d[0x1600 + P.MSG_APPEAR_OFF] == 0x0a                    # notification appear step (half)
+    assert d[0x1700 + P.MSG_DISAPPEAR_OFF] == 0xf6                 # notification disappear (half)
 
 
 def test_cave_redirects_and_bodies():

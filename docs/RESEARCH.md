@@ -143,6 +143,21 @@ the character-animation engine (`FUN_80042eb0`) — so enemies/sword/NPCs are un
 `tools/redux_framediff.lua` + a VRAM diff of `/api/v1/gpu/vram/raw`; see §8 dead-ends for the
 several wrong turns first — UV scroll, sprite frame-cycling, and the character engine.)*
 
+### NOTIFICATION messages — display speed (3 byte edits, `FUN @0x80042xxx`)
+Bottom-screen notifications (gold pickup, "Tombstone"/"Empty" inspect text, etc.) are
+**pre-rendered text textures** drawn as a sprite, animated by a per-frame phase machine on three
+bytes — `F7` phase / `F8` hold timer / `F9` ramp — at `0x801aeaf7..f9`:
+- **appear** (phase 1): `F9 += 0x14`/frame until `>= 0x64` (`@0x8004216c`)
+- **hold** (phase 2): `F8` (init `0x0F` `@0x80042024`) `-= 1`/frame until 0 (`@0x800421a4`)
+- **disappear** (phase 3): `F9 += 0xec` (i.e. `-0x14`)/frame until 0 (`@0x800421d0`)
+
+Total ≈ 25 frames → 0.4 s at 60 fps (4× too fast to read). Fix = slow each phase ÷N with **three
+same-size byte edits**: appear/disappear ramp step `0x14 → 0x05` (`-0x14 → -0x05` = `0xec → 0xfb`),
+hold init `0x0F → 0x3C`. `0x64` divides evenly by the new step so `F9` still lands exactly on
+`0x64`/`0` (no overshoot). No cave, no flicker (the draw runs every frame; only the rate constants
+change). *(Half mode: step `0x0a`, hold `0x1e`.)* *(Found via DuckStation's memory viewer — the
+state bytes at `0x801aeaf5..f9` — after CPU-side diffs drowned in enemy/NPC/sound/render noise.)*
+
 ### ATTACK-BAR — weapon charge (`DAT_801b2502`, in `FUN_8002d2a0`)
 The idle recharge (delay timer `0x24f3` countdown + charge fill) runs every frame and sits
 behind a gate `bne v0,zero,...` where `v0 = (0x265c & 0x1870)`. The cave **folds the frame
@@ -309,6 +324,7 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Ground level (landing) | `0x801e6474` | Y the collision routine snaps to on landing |
 | Player facing | `0x801b2612` | |
 | Water CLUT scroll pos | `0x801aeb20` | 0–31 row offset; engine `FUN_8003529x`, VRAM CLUT (1008,96) |
+| Notification msg state | `0x801aeaf7/f8/f9` | phase / hold timer / ramp; updater `@0x80042xxx` |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
 | Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |
 | Swing animation arc | `0x801b25a4` | player attack-swing angle; `+= s2`/frame to `0xfff`; speed `s2` from weapon `[0x1c]`/`[0x24]`; fn `FUN_8002d2a0`, hit window base `0x801b25a8` |

@@ -228,6 +228,27 @@ WATERSCROLL_CAVE = {
                 0x00000000, 0x00001821, 0x0800d4a1, 0x00000000],   # frame & 1 -> advance ÷2
 }
 
+# --- NOTIFICATION message display speed (3 byte edits, FUN @0x80042xxx) ---
+# Bottom-screen messages (pre-rendered text textures) animate via a per-frame phase machine on
+# bytes F7(phase)/F8(hold timer)/F9(ramp) @0x801aeaf7..f9:
+#   appear : F9 += 0x14/frame until >=0x64   (@0x8004216c)
+#   hold   : F8 (init 0x0F @0x80042024) -= 1/frame until 0   (@0x800421a4)
+#   disappear: F9 += 0xec (= -0x14)/frame until 0   (@0x800421d0)
+# Total ~25 frames -> 0.4s at 60fps (4x too fast). Slow each phase /N: ramp step /N, hold init xN.
+# 0x64 is divisible by the new steps so F9 still lands exactly on 0x64/0 (no overshoot).
+MSG_HOLD_SIG = bytes.fromhex("0000c2a0""0f000234""1b80013c""f8ea22a0")
+MSG_HOLD_OFF = 0x04            # `ori v0,zero,0xf` immediate (F8 hold frames) -> xN
+MSG_HOLD_OLD = 0x0f
+MSG_HOLD_NEW = {"quarter": 0x3c, "half": 0x1e}
+MSG_APPEAR_SIG = bytes.fromhex("1b80023c""f9ea4290""00000000""14004224""1b80013c""f9ea22a0")
+MSG_APPEAR_OFF = 0x0c          # `addiu v0,v0,0x14` step (F9 ramp up) -> /N
+MSG_APPEAR_OLD = 0x14
+MSG_APPEAR_NEW = {"quarter": 0x05, "half": 0x0a}
+MSG_DISAPPEAR_SIG = bytes.fromhex("1b80023c""f9ea4290""00000000""ec004224""1b80013c""f9ea22a0")
+MSG_DISAPPEAR_OFF = 0x0c       # `addiu v0,v0,0xec` (= -0x14) step (F9 ramp down) -> -0x14/N
+MSG_DISAPPEAR_OLD = 0xec
+MSG_DISAPPEAR_NEW = {"quarter": 0xfb, "half": 0xf6}   # -5 (quarter), -10 (half)
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -478,6 +499,17 @@ def apply_patches(data, mode):
         "menucap byte mismatch"
     data[mc + MENUCAP_OFF:mc + MENUCAP_OFF + 4] = MENUCAP_NEW.to_bytes(4, "little")
     print("MENU-CAP @0x%X (menu flush 0x800270f8 only; overworld flush untouched)" % (mc + MENUCAP_OFF))
+
+    # NOTIFICATION message display speed: slow the 3-phase appear/hold/disappear animation /N.
+    for name, sig, off, old, new in (
+            ("msg-hold", MSG_HOLD_SIG, MSG_HOLD_OFF, MSG_HOLD_OLD, MSG_HOLD_NEW[mode]),
+            ("msg-appear", MSG_APPEAR_SIG, MSG_APPEAR_OFF, MSG_APPEAR_OLD, MSG_APPEAR_NEW[mode]),
+            ("msg-disappear", MSG_DISAPPEAR_SIG, MSG_DISAPPEAR_OFF, MSG_DISAPPEAR_OLD,
+             MSG_DISAPPEAR_NEW[mode])):
+        idx = find_once(data, sig, name)
+        assert data[idx + off] == old, "%s byte mismatch" % name
+        data[idx + off] = new
+        print("MSG %-13s @0x%X  0x%02x -> 0x%02x" % (name, idx + off, old, new))
 
 
 def make_bps(source, target):
