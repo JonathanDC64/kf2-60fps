@@ -228,6 +228,41 @@ WATERSCROLL_CAVE = {
                 0x00000000, 0x00001821, 0x0800d4a1, 0x00000000],   # frame & 1 -> advance ÷2
 }
 
+# --- ENEMY DROP "4x loot" fix (death-state drop block in FUN_800500a8) ---
+# On death, an enemy spawns ALL its loot (gold via FUN_80046294, items via FUN_800460bc) inside one
+# block gated by the edge detector FUN_8004db98(enemy,0x800) @0x800506c0: it returns true while
+# `timer - step <= 0x800 < timer`, where timer=obj[0x18] and step=obj[0x66] (last anim step, written
+# by FUN_8004db3c). That is a correct ONE-shot edge *only when* step == the per-think advance. Our
+# ENEMYANIM fix scales the advance (obj[0x18] += step>>N) but FUN_8004db3c still stores the FULL step
+# in obj[0x66] -- so the edge "window" stays the full step (e.g. 0xa0) wide while the timer now
+# creeps step>>N (e.g. 0x28) per think. The edge stays true for N consecutive thinks, so the whole
+# drop block (gold + items, each rand-rolled) runs N times -> N x loot (the long-standing "4x drops"
+# at 60 fps). Confirmed live: gold(FUN_80046294)+herb(FUN_800460bc) both fire 4x; timer steps 0x28.
+# Fix: redirect THIS edge check (only this call site -- FUN_8004db98 is shared by attack states) to a
+# cave that recomputes the crossing with the ACTUAL advance (step>>N, read live from obj[0x66]) and
+# returns v0=1 only on the genuine crossing think -> the entire block runs exactly once. a0=enemy
+# (addu a0,s3 just before), a1=0x800 (the jal delay slot, runs before the cave). Self-calibrating.
+# @0x800506b4: addiu v0,v1,-0x200 / sh v0,0x16(s3) / addu a0,s3,zero / jal 0x8004db98 / ori a1,0x800
+DROPEDGE_SIG = bytes.fromhex(
+    "00fe6224""160062a6""21206002""e636010c""00080534")
+DROPEDGE_OFF = 0x0c                 # the `jal 0x8004db98` (e636010c) -> jal cave
+DROPEDGE_OLD = "e636010c"
+DROPEDGE_JMP = 0x0c020455           # jal 0x80081154
+DROPEDGE_CAVE_VADDR = 0x80081154    # same gap, immediately past the waterscroll cave (ends 0x80081154)
+#   cave (mirrors FUN_8004db98 but window = step>>N instead of full step):
+#     lhu t1,0x66(a0)[step] / lhu t0,0x18(a0)[timer] / sra t1,t1,N (advance) / subu t2,t0,t1 (prev)
+#     / sltu t3,a1,t0 (thr<timer) / sltu t4,a1,t2 (thr<prev) / xori t4,t4,1 (prev<=thr)
+#     / and v0,t3,t4 (=single-think crossing) / jr ra / nop
+#   NOTE: timer load placed AFTER step load to fill the R3000 load-delay slot of `lhu t1` (so the
+#   `sra t1` sees the real step). subu reads t0 two instrs after its load -> settled. a1 is the
+#   threshold from the original delay slot (0x800) -- using it keeps the cave generic.
+DROPEDGE_CAVE = {
+    "quarter": [0x94890066, 0x94880018, 0x00094883, 0x01095023, 0x00a8582b,
+                0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,2
+    "half":    [0x94890066, 0x94880018, 0x00094843, 0x01095023, 0x00a8582b,
+                0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,1
+}
+
 # --- NOTIFICATION message display speed (3 byte edits, FUN @0x80042xxx) ---
 # Bottom-screen messages (pre-rendered text textures) animate via a per-frame phase machine on
 # bytes F7(phase)/F8(hold timer)/F9(ramp) @0x801aeaf7..f9:
@@ -455,6 +490,8 @@ def apply_patches(data, mode):
            FIREANIM_CAVE_VADDR, FIREANIM_CAVE[mode])
     inject("waterscroll", WATERSCROLL_SIG, WATERSCROLL_REDIR_OFF, WATERSCROLL_REDIR_OLD,
            WATERSCROLL_JMP, WATERSCROLL_CAVE_VADDR, WATERSCROLL_CAVE[mode])
+    inject("dropedge", DROPEDGE_SIG, DROPEDGE_OFF, DROPEDGE_OLD, DROPEDGE_JMP, DROPEDGE_CAVE_VADDR,
+           DROPEDGE_CAVE[mode])
 
     # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
     # (both sites still original at find time), then both edits applied -- so no re-find needed.

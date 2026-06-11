@@ -24,6 +24,7 @@ TURNFACE_CAVE_OFF = P._bin_off(P._file_off(P.TURNFACE_CAVE_VADDR))
 GRAV_CAVE_OFF = P._bin_off(P._file_off(P.GRAV_CAVE_VADDR))
 FIREANIM_CAVE_OFF = P._bin_off(P._file_off(P.FIREANIM_CAVE_VADDR))
 WATERSCROLL_CAVE_OFF = P._bin_off(P._file_off(P.WATERSCROLL_CAVE_VADDR))
+DROPEDGE_CAVE_OFF = P._bin_off(P._file_off(P.DROPEDGE_CAVE_VADDR))
 MENUCAP_OFF_FIX = P._bin_off(P._file_off(P.MENUCAP_VADDR))      # menu flush is patched by address
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
@@ -44,13 +45,15 @@ SIGS = {
     "item-fastspin": (0x1a00, P.ITEM_IMM_EDITS[1][1]),
     "item-moveout": (0x1b00, P.ITEM_IMM_EDITS[2][1]),
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
+    "dropedge": (0x1c00, P.DROPEDGE_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
 def make_fixture():
     buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF, TURNFACE_CAVE_OFF,
-                        GRAV_CAVE_OFF, FIREANIM_CAVE_OFF, WATERSCROLL_CAVE_OFF) + 0x400)
+                        GRAV_CAVE_OFF, FIREANIM_CAVE_OFF, WATERSCROLL_CAVE_OFF,
+                        DROPEDGE_CAVE_OFF) + 0x400)
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
@@ -123,6 +126,8 @@ def test_cave_redirects_and_bodies():
         P.FIREANIM_JMP.to_bytes(4, "little")
     assert d[0x1400 + P.WATERSCROLL_REDIR_OFF:0x1400 + P.WATERSCROLL_REDIR_OFF + 4] == \
         P.WATERSCROLL_JMP.to_bytes(4, "little")
+    assert d[0x1c00 + P.DROPEDGE_OFF:0x1c00 + P.DROPEDGE_OFF + 4] == \
+        P.DROPEDGE_JMP.to_bytes(4, "little")
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
                        (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
@@ -130,7 +135,8 @@ def test_cave_redirects_and_bodies():
                        (TURNFACE_CAVE_OFF, P.TURNFACE_CAVE["quarter"]),
                        (GRAV_CAVE_OFF, P.GRAV_CAVE["quarter"]),
                        (FIREANIM_CAVE_OFF, P.FIREANIM_CAVE["quarter"]),
-                       (WATERSCROLL_CAVE_OFF, P.WATERSCROLL_CAVE["quarter"])):
+                       (WATERSCROLL_CAVE_OFF, P.WATERSCROLL_CAVE["quarter"]),
+                       (DROPEDGE_CAVE_OFF, P.DROPEDGE_CAVE["quarter"])):  # noqa: E501 reordered for load-delay
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp

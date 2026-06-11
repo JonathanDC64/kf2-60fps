@@ -321,39 +321,32 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 ## 6. Open / in progress
 
 - **Enemy attack timing** (largely covered by the animation phase).
-- **KNOWN ISSUE — enemies drop 4× items** (4 gold piles / 4 herbs instead of 1). Present since the
-  first capped build; reproduces even with **no overclock** (so it's not framerate — it's the
-  4-vblanks→1-vblank **CAP** change altering the vblank:logic-frame ratio from 4:1 to 1:1, the same
-  class as the menu/water "runs 4×" bugs). The drop-spawn almost certainly isn't edge-triggered.
-  *Not yet located* — resisted ~a dozen RE approaches. **Ruled out (don't re-walk):** the gold
-  amounts (24/5/13/24) don't cluster at any stride; the entity links at `0x80199xxx` are a
-  scattered linked-list pool (collect-diff is pure relink noise); `0x801ad118` is the *character*
-  colour-interp engine (`FUN_80042eb0`); `0x801e6488` is the **collision/spatial-query** result of
-  `FUN_80033f38` (the `0→4` was query flags, not a drop count); the 200-entry object array at
-  `0x80185da8` (stride `0x88`) doesn't gain gold objects on a kill (it's the collision/find array,
-  per `FUN_8004d644`). **Next approach:** single-step the enemy-death routine in a debugger, or
-  statically trace the enemy-AI death/loot code in Ghidra — the drops go to a pickup pool not yet
-  found. Pre/post captures `drop_pre.bin`/`drop_post.bin` (enemy alive vs 4 golds) exist for reuse.
-  **Combat→death chain mapped (Ghidra):** player swing `FUN_8002d2a0` → `FUN_8004d644` (find enemy
-  in range) → `FUN_8004c668` (apply damage; **enemy HP @ struct+0x1a**, struct in the `0x80185da8`
-  array, stride `0x88`). When `HP - dmg < 1` it calls `FUN_8004c0b0(enemy, 3)` → `FUN_8004c068`
-  (fetch the "action 3 = death" **animation script**) → `FUN_8004b94c` (`enemy[0x60]` = script ptr,
-  `enemy[0xe]` = first state). The death plays as a **bytecode animation script** (the `0x8000`-
-  series opcodes interpreted by the AI-update cases, e.g. case `0x19`, via `FUN_8004f414`); loot is
-  almost certainly a **script opcode**, so it isn't a plain spawn call. The 4× is likely that opcode
-  (or its repeat-count `0x8001`) firing 4× under the changed vblank:frame ratio — **next: decompile
-  the death script data + `FUN_8004f414` to find the loot/gold opcode and its count.**
-  **Exhausted the C-level chain (Ghidra, ~10 fns):** manager `FUN_80052e5c` (iterates the 200-enemy
-  `0x80185da8` array; per-enemy "think" `FUN_8004c1f0`/`FUN_8004c01c` are *gated* `frame&3==i&3`,
-  i.e. each enemy thinks every 4th logic frame — so at 60fps enemies think 4× more often in real
-  time, a cap side effect, but those fns are pure AI movement/targeting, no loot); setup
-  `FUN_8004da2c`; AI-animation `FUN_800500a8` (full state switch incl. death-done `LAB_80051d0c` →
-  `FUN_8004c104` which just sets `enemy[0xf]=0xff`); damage `FUN_8004c668`; death-state
-  `FUN_8004c0b0`/`FUN_8004c068`/`FUN_8004b94c`; script spawn `FUN_8004f414`. **The loot-spawn is in
-  none of them** — it's emitted by an **opcode in the per-enemy death-animation bytecode script**
-  (data in the `DAT_8018c7e8 + type*0x78` enemy-type tables, fetched by `FUN_8004c068(type,action)`).
-  Cracking it = RE the script-bytecode format + per-enemy death-script data (a data-driven
-  subsystem), not a function decompile. **Deferred as a deep, separate effort.**
+- **Enemies drop 4× items** (4 gold piles / 4 herbs instead of 1) — **SOLVED** (`DROPEDGE` patch).
+  **Root cause: our own `ENEMYANIM` fix.** On death, `FUN_800500a8` case 3 spawns *all* loot —
+  gold via `FUN_80046294`, items via `FUN_800460bc` — inside one block gated by the edge detector
+  `FUN_8004db98(enemy, 0x800)` @`0x800506c0`. That detector returns true while
+  `timer - step ≤ 0x800 < timer` (`timer = obj[0x18]`, `step = obj[0x66]`, both written by the
+  shared anim-advance `FUN_8004db3c`). It's a correct **one-shot** edge *only when* `step` == the
+  per-think advance. Our `ENEMYANIM` patch scales the **advance** (`obj[0x18] += step>>N`) but
+  `FUN_8004db3c` still stores the **full** step in `obj[0x66]` — so the edge window stays the full
+  step (`0xa0`) wide while the timer now creeps `step>>N` (`0x28`) per think. The edge stays true
+  for **N consecutive thinks**, so the whole drop block (with its rand rolls) runs N× → N× loot.
+  Confirmed live (PCSX-Redux exec breakpoints): drop calls at timer `0x820/0x848/0x870/0x898`,
+  `step=0xa0`, advance `0x28`.
+  **Fix:** redirect *only* this edge-check call site to a cave that recomputes the crossing with the
+  **actual** advance (`step>>N`, read live from `obj[0x66]`) and returns `v0=1` only on the genuine
+  crossing think → the whole block runs once. `FUN_8004db98` is shared by attack states, so only
+  this one call is redirected. Cave @`0x80081154` (mirrors `FUN_8004db98`, window `= step>>N`).
+  **How it was found (the long way):** the loot is **not** in the entity array `0x80185da8`, the
+  10-slot pool `0x8018c298`, or the effects array `0x801b80ec` — it lives in a **stride-`0x44`
+  array based at `0x80197754`** that no generic spawner (`FUN_80053c84`/`FUN_8004b524`/`FUN_8004f414`
+  /`FUN_8002ab18`) writes. Located via a before/after RAM diff (`0xff→non-0xff` slot allocations
+  cluster at stride `0x44`), then `find_refs` → the array's allocator `FUN_80046034`, whose 5
+  callers include the two death-drop spawners. **Red herring:** `FUN_800460bc` (item `0x68`) was
+  gated first (v24/v25) — it's a *different* drop; the visible gold is `FUN_80046294`. Gating the
+  shared edge (v26) fixes both at once. *(The same `step≠advance` desync technically widens the
+  edge window for every `FUN_8004db98` user incl. attacks, but only the death-drop block was
+  reported/visible; left untouched.)*
 - **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
   rescaled with a cave if a non-cosmetic bob is wanted.
 
@@ -381,7 +374,20 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Magic delay timer | `0x801b24f4` | |
 | Magic fill fn | `FUN_8002fe1c` | `0x2506 += sVar3` @ `0x80030220` |
 | Controller buffer | `0x80007572` | active-low (Up = bit `0x10` clear) |
-| Code-cave gaps | `0x8007EF80`, `0x80081078` | inter-function padding, file-verified free |
+| Code-cave gaps | `0x8007EF80`, `0x80081078` | inter-function padding, file-verified free (gap2 runs to ≈`0x800811a4`) |
+| **Ground-drop array** | `0x80197754` | **gold/herb/loot pickups**; stride `0x44`; free slot = `byte[+4]==0xff`; type `+6`, display-class `+4` (`0x60/0x61/0x62`), amount `+0x3a`, pos `+0x14/+0x18/+0x1c`, spin `+0x26`, anim-timer `+0x10`. Per-frame render/update = `FUN_80047010` (the giant 4421-insn world-object fn). Alloc counter `0x8019839a` (+`0x839c/0x839e` for other categories) |
+| Ground-drop allocator | `FUN_80046034` | scans `0x80197754` for a free slot; 5 callers = every item-spawn site |
+| Gold drop spawner | `FUN_80046294` | one gold pile: type `0x95`, display `0x62`, `rand` scatter+spin, `param_1`=amount |
+| Item drop spawner | `FUN_800460bc` | one item: display from `(&DAT_8018fb3d)[item*0x18]`; called once from death-state case 3 |
+| Slot init / claim | `FUN_800448b8` / `FUN_80046014` | zero a slot / set type byte `+4` if free (`==0xff`) |
+| Death-anim edge detector | `FUN_8004db98` | `(thr<obj[0x18]) && (obj[0x18]-obj[0x66]<=thr)`; one-shot **only if** `obj[0x66]`(step)==per-think advance |
+| Shared anim-advance | `FUN_8004db3c` | `obj[0x18]+=step` (clamp `[0,0xfff]`), stores `obj[0x66]=|step|`; **our `ENEMYANIM` cave ÷N's the advance but not `obj[0x66]`** |
+| Enemy think/anim FSM | `FUN_800500a8` | per-enemy state machine on `obj[0xe]`; death = state 3 (drop block @`0x800506c0`–`0x80050788`) |
+| Enemy manager | `FUN_80052e5c` | iterates 200 enemies `0x80185da8` stride `0x88`; think gated `(DAT_8018facc&3)==(i&3)` |
+| Enemy HP | `enemy + 0x1a` | in the `0x80185da8` array; lethal when `HP-dmg<1` → `FUN_8004c0b0(enemy,3)` |
+| XP / level-up | `FUN_8002a310` | `DAT_801b24e4`+=xp; level tables `@0x8009f114`; **not** loot (edge-guarded by HP≠0) |
+| Effects/decals array | `0x801b80ec` | stride `0x4c`, 128 slots, free=`byte0==0xff`; lifetime `+0x10`; manager `FUN_8005bc50`, alloc `FUN_80053b64` (sole caller `FUN_80053c84`) — short-lived sparks/projectiles, **not** persistent loot |
+| Dynamic-object pool | `0x8018c298` | stride `0x88`, 10 slots, free=`byte0==0xff`; alloc `FUN_8004b524` — spawned objects/projectiles |
 
 ## 8. Water / animated-texture investigation (SOLVED — fix in §4 "WATER")
 
@@ -545,3 +551,93 @@ frames and the angle reaches `0x400`. Only once open is confirmed, mirror it for
 (`0x80048364`: `0x14c→0x1ac`, `0x80048458`: `-0x20→-0x08`). Leave the `counter<0x15` player-push
 window (`0x8004820c`) alone. Repeat for any other door-type handler (the `s4` path). Door object
 fields: angle `obj[0x1e]`, state/timer `obj[0x38]`; tested door base `0x80193b54`.
+
+## 12. Session findings — loot subsystem, edge detector, tooling (4× drop deep-dive)
+
+This documents everything turned up while solving the 4× drop bug, **including tangents not
+strictly needed for the fix**, so the ground is mapped for future work.
+
+### 12.1 The ground-drop / pickup subsystem (newly mapped)
+- **Loot lives in its own array at `0x80197754`, stride `0x44`** (≈ up to ~40 slots; gold landed in
+  slots 0–3 and 20–23 in one capture, i.e. the allocator fills from the low free slot). This array
+  is *separate* from the enemy array, the dynamic pool, and the effects array (all three were ruled
+  out by a live dump — see §12.3). Slot layout (offsets within the `0x44` stride):
+  - `+4` display-class / free marker — `0xff` = free; set to `0x60`/`0x61`/`0x62` by `FUN_80046014`
+    (class is keyed by the item's `(&DAT_8018fb3d)[item*0x18]` table). `0x62` = gold-class,
+    `0x61` = herb-class.
+  - `+6` item type id (e.g. gold = `0x95`).
+  - `+0x10` per-item anim timer (advanced `+0x100`/frame, clamp `0xfff` — same idiom as enemy/fire).
+  - `+0x14/+0x18/+0x1c` world position (x/y/z).
+  - `+0x26` spin angle (`rand>>3` at spawn — this is the ground-pickup spin, *distinct* from the
+    examine/display spin at `0x801929a6`).
+  - `+0x3a` amount (gold value); `+0x3c` a per-spawn sequence id (from counter `0x8019839a`).
+  - `+0x38` = `0xff`, `+0x3e` flags (`0xff88` for gold).
+- **Allocator `FUN_80046034`** scans `0x80197754` for a free slot (`byte[+4]==0xff`). Its **5
+  callers** are the complete set of spawn sites into this array:
+  `FUN_800460bc`, `FUN_80046294`, `FUN_8005db30`, `FUN_8005c7e8`, `FUN_8005cbe0`. The last three are
+  likely inventory/menu/give-item paths (not enemy death) — **not investigated**, a lead if other
+  item-count bugs appear.
+- **Renderer/updater `FUN_80047010`** (4421 insns) walks `0x80197754` every frame and builds the GPU
+  primitives (writes scratchpad `0x1f80xxxx`). It is *not* the spawner.
+- **Two death-drop spawners**, both called from `FUN_800500a8` case 3 (death state), both gated by
+  the same edge check: `FUN_80046294` (gold, hardcodes type `0x95`/class `0x62`, `param_1`=amount)
+  at `0x80050700`, and `FUN_800460bc` (item, e.g. herb id `0x68`) at `0x80050780`.
+
+### 12.2 The edge-detector mechanism (root cause, with a latent side effect)
+- `FUN_8004db98(obj, thr)` = `(thr < obj[0x18]) && (obj[0x18] - obj[0x66] <= thr)` — a "did the anim
+  timer cross `thr` *this* think" detector. Correct **iff** `obj[0x66]` (the stored step) equals the
+  real per-think advance.
+- `FUN_8004db3c(obj, step)` does `obj[0x18] += step; obj[0x66] = |step|`. **Our `ENEMYANIM` 60fps fix
+  shifts the advance (`obj[0x18] += step>>N`) but leaves `obj[0x66]` = full step.** So every
+  `FUN_8004db98` caller now sees a window N× too wide → fires for N consecutive thinks.
+- **LATENT (unfixed) consequence:** `FUN_8004db98` also gates enemy **attack** spawns (e.g. cases
+  4/0x12/0x17/0x18 in `FUN_800500a8`, via `FUN_8004d254`→`FUN_8002ab18`). Those are *also* mis-firing
+  up to N× under the cap, but it wasn't visually obvious (overlapping projectiles / extra hits) and
+  the user only reported drops. **If enemies later seem to hit too many times or spit extra
+  projectiles, this is why** — the general fix would be to ÷N `obj[0x66]` in `FUN_8004db3c` too, but
+  that field is also read elsewhere (e.g. the `obj[0x66]*-4` anim rewind in `FUN_800500a8` case
+  `0x84`), so a global change needs care. We fixed only the death-drop edge call site.
+
+### 12.3 Arrays ruled out for loot (don't re-walk)
+- **Enemy array `0x80185da8`** (200 × `0x88`, free=`byte0==0xff`): a live dump after a kill showed
+  58 active *enemy* structs and **no** gold/herb entries. Init `FUN_8004b8fc`, per-frame sweep
+  `FUN_8004b794`.
+- **Dynamic pool `0x8018c298`** (10 × `0x88`): empty during a kill; alloc `FUN_8004b524` never fired.
+- **Effects/decals `0x801b80ec`** (128 × `0x4c`, lifetime `+0x10`): 0 active even with 8 drops on the
+  floor — it's short-lived sparks/projectiles, manager `FUN_8005bc50`, alloc `FUN_80053b64` (whose
+  sole caller is the universal effect spawner `FUN_80053c84`). Gold/herb do **not** use it.
+
+### 12.4 Combat → death → loot chain (confirmed)
+player swing `FUN_8002d2a0` → `FUN_8004d644` (find enemy in range) → `FUN_8004c668` (apply damage;
+**enemy HP @ `+0x1a`**). On `HP-dmg<1`: awards XP via `FUN_8002a310` (**confirmed XP/level system**,
+not loot — `DAT_801b24e4` accumulator, level tables `0x8009f114`; edge-guarded by HP≠0 so it runs
+once), then `FUN_8004c0b0(enemy, 3)` → `FUN_8004c068` (fetch the action-3 death anim script) →
+`FUN_8004b94c` (`enemy[0x60]`=script ptr, `enemy[0xe]`=first state). The **death transition fires
+exactly once** (verified live: one `action=3` call). The 4× was never in the transition — it was the
+per-think edge detector inside the death-anim state.
+
+### 12.5 PCSX-Redux RE tooling learned/added this session
+- **Exec breakpoints work** and can log non-pausing (callback that doesn't call `pauseEmulator`);
+  proven with a frame-pacer heartbeat on `FUN_80019614`.
+- **Narrow Write watchpoints work** (width ≤ 4). **Wide-range Write watchpoints DO NOT arm** (a
+  `0x6a40`-wide watch caught zero writes) — likely a hardware-watchpoint width cap. Sweep memory by
+  other means (see RAM-diff below), not a giant watchpoint.
+- **LuaJIT, not 5.3:** no `&` operator — use `bit.band`. Read RAM via `PCSX.getMemPtr()` (FFI
+  `uint8_t*`, index by `addr & 0x1fffff`); snapshot via `ffi.string`.
+- **Heavy file I/O in breakpoint callbacks crashes Redux** — accumulate in memory, flush to disk
+  ~1/sec from the frame hook.
+- New tools (in `tools/`): `redux_dropfind.lua` (exec-hook call-site/ra histogram for spawner
+  candidates), `redux_dropcall.lua` (logs each `FUN_800460bc` call + the enemy's timer/step/substate),
+  `redux_dropwrite.lua` (narrow write-watch on specific loot bytes → writer PC), `redux_pickdump.lua`
+  (read-only dump of the candidate arrays), `redux_ramdiff.lua` (**the winner** — before/after RAM
+  snapshot diff; `0xff→non-0xff` transitions reveal new slot allocations and the array's stride).
+  `redux_entitywatch.lua` exists but relies on a wide watchpoint, so it does **not** work.
+- Ghidra headless helper `find_refs.java` (functions referencing an address/range, sorted by size —
+  finds tiny allocators fast) and `dump_bytes.java` (raw bytes / word-scan for a target opcode).
+
+### 12.6 Process note (why v24/v25 "failed")
+`FUN_800460bc` (item `0x68`) happened to also fire 4× and was gated first (v24/v25) — a **red
+herring**: it's a *different* drop than the visible gold (`FUN_80046294`). v24 also had an **R3000
+load-delay bug** (shifted the step register the instruction right after loading it → stale value).
+Lesson reinforced: on the R3000 a loaded register isn't available to the next instruction — fill the
+delay slot. v26 gates the *shared edge*, fixing gold + herb together. Confirmed in-game.
