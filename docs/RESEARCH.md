@@ -334,6 +334,15 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   per `FUN_8004d644`). **Next approach:** single-step the enemy-death routine in a debugger, or
   statically trace the enemy-AI death/loot code in Ghidra — the drops go to a pickup pool not yet
   found. Pre/post captures `drop_pre.bin`/`drop_post.bin` (enemy alive vs 4 golds) exist for reuse.
+  **Combat→death chain mapped (Ghidra):** player swing `FUN_8002d2a0` → `FUN_8004d644` (find enemy
+  in range) → `FUN_8004c668` (apply damage; **enemy HP @ struct+0x1a**, struct in the `0x80185da8`
+  array, stride `0x88`). When `HP - dmg < 1` it calls `FUN_8004c0b0(enemy, 3)` → `FUN_8004c068`
+  (fetch the "action 3 = death" **animation script**) → `FUN_8004b94c` (`enemy[0x60]` = script ptr,
+  `enemy[0xe]` = first state). The death plays as a **bytecode animation script** (the `0x8000`-
+  series opcodes interpreted by the AI-update cases, e.g. case `0x19`, via `FUN_8004f414`); loot is
+  almost certainly a **script opcode**, so it isn't a plain spawn call. The 4× is likely that opcode
+  (or its repeat-count `0x8001`) firing 4× under the changed vblank:frame ratio — **next: decompile
+  the death script data + `FUN_8004f414` to find the loot/gold opcode and its count.**
 - **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
   rescaled with a cave if a non-cosmetic bob is wanted.
 
