@@ -23,6 +23,7 @@ SWING_CAVE_OFF = P._bin_off(P._file_off(P.SWING_CAVE_VADDR))
 TURNFACE_CAVE_OFF = P._bin_off(P._file_off(P.TURNFACE_CAVE_VADDR))
 GRAV_CAVE_OFF = P._bin_off(P._file_off(P.GRAV_CAVE_VADDR))
 FIREANIM_CAVE_OFF = P._bin_off(P._file_off(P.FIREANIM_CAVE_VADDR))
+WATERSCROLL_CAVE_OFF = P._bin_off(P._file_off(P.WATERSCROLL_CAVE_VADDR))
 MENUCAP_OFF_FIX = P._bin_off(P._file_off(P.MENUCAP_VADDR))      # menu flush is patched by address
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
@@ -37,13 +38,14 @@ SIGS = {
     "door_closewin": (0xe00, P.DOOR_CLOSEWIN_SIG), "door_closeramp": (0xf00, P.DOOR_CLOSERAMP_SIG),
     "menu": (0x1000, P.MENU_SIG), "menucap": (MENUCAP_OFF_FIX, P.MENUCAP_SIG),
     "gravity": (0x1200, P.GRAV_SIG), "fireanim": (0x1300, P.FIREANIM_SIG),
+    "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
 
 def make_fixture():
     buf = bytearray(max(MAG_CAVE_OFF, SWING_CAVE_OFF, TURNFACE_CAVE_OFF,
-                        GRAV_CAVE_OFF, FIREANIM_CAVE_OFF) + 0x400)   # fit highest cave
+                        GRAV_CAVE_OFF, FIREANIM_CAVE_OFF, WATERSCROLL_CAVE_OFF) + 0x400)
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
@@ -102,13 +104,16 @@ def test_cave_redirects_and_bodies():
         P.GRAV_JMP.to_bytes(4, "little")
     assert d[0x1300 + P.FIREANIM_REDIR_OFF:0x1300 + P.FIREANIM_REDIR_OFF + 4] == \
         P.FIREANIM_JMP.to_bytes(4, "little")
+    assert d[0x1400 + P.WATERSCROLL_REDIR_OFF:0x1400 + P.WATERSCROLL_REDIR_OFF + 4] == \
+        P.WATERSCROLL_JMP.to_bytes(4, "little")
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
                        (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
                        (SWING_CAVE_OFF, P.SWING_CAVE["quarter"]),
                        (TURNFACE_CAVE_OFF, P.TURNFACE_CAVE["quarter"]),
                        (GRAV_CAVE_OFF, P.GRAV_CAVE["quarter"]),
-                       (FIREANIM_CAVE_OFF, P.FIREANIM_CAVE["quarter"])):
+                       (FIREANIM_CAVE_OFF, P.FIREANIM_CAVE["quarter"]),
+                       (WATERSCROLL_CAVE_OFF, P.WATERSCROLL_CAVE["quarter"])):
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp

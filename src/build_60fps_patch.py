@@ -204,6 +204,30 @@ FIREANIM_CAVE = {
     "half":    [0x3c028018, 0x8c422964, 0x00031840, 0x08010684, 0x00000000],  # sll v1,v1,1 (*2)
 }
 
+# --- WATER (and other scrolling textures) -- CLUT scroll engine (FUN_8003529x) ---
+# Water shimmer is a palette/CLUT *scroll*: a scroll descriptor (s0) holds step(+1), position(+2,
+# = 0x801aeb20, the 0..31 row offset), max(+0x14) and VRAM coords; each render frame it does
+# `position += step` (wrap at max) then DMAs the scrolled CLUT to VRAM @(1008,96) via FUN_80079e90.
+# At 60fps the scroll advances 4x too fast. Gate ONLY the position advance to every Nth frame
+# (force step=0 on the other frames) -- the per-frame VRAM upload still runs (no flicker), the
+# scroll just advances /N. This is the texture-scroll engine, NOT the character engine
+# (FUN_80042eb0), so characters are unaffected. @0x80035278: lbu v1,1(s0)[step] / lhu v0,2(s0)
+# [pos] / nop / addu a1,v1,v0. Redirect the step load to a cave that zeros step off-cadence.
+WATERSCROLL_SIG = bytes.fromhex(
+    "00004392""01000234""2b006214""00000000""01000392""02000296""00000000""21286200""00140500")
+WATERSCROLL_REDIR_OFF = 0x10       # `lbu v1,1(s0)` (01000392) -> j cave
+WATERSCROLL_REDIR_OLD = "01000392"
+WATERSCROLL_JMP = 0x0802044b       # j 0x8008112c
+WATERSCROLL_CAVE_VADDR = 0x8008112c  # same 300-byte gap, past the fire cave (ends 0x8008112c)
+#   cave: lbu v1,1(s0) / lui a0,0x801b / lw a0,0x2580(a0) / nop / andi a0,a0,N-1 / beqz a0,keep
+#         / nop / move v1,zero / [keep] j 0x80035284 / nop      (step=0 unless frame%N==0)
+WATERSCROLL_CAVE = {
+    "quarter": [0x92030001, 0x3c04801b, 0x8c842580, 0x00000000, 0x30840003, 0x10800002,
+                0x00000000, 0x00001821, 0x0800d4a1, 0x00000000],   # frame & 3 -> advance ÷4
+    "half":    [0x92030001, 0x3c04801b, 0x8c842580, 0x00000000, 0x30840001, 0x10800002,
+                0x00000000, 0x00001821, 0x0800d4a1, 0x00000000],   # frame & 1 -> advance ÷2
+}
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -379,6 +403,8 @@ def apply_patches(data, mode):
            TURNFACE_CAVE_VADDR, TURNFACE_CAVE[mode])
     inject("fireanim", FIREANIM_SIG, FIREANIM_REDIR_OFF, FIREANIM_REDIR_OLD, FIREANIM_JMP,
            FIREANIM_CAVE_VADDR, FIREANIM_CAVE[mode])
+    inject("waterscroll", WATERSCROLL_SIG, WATERSCROLL_REDIR_OFF, WATERSCROLL_REDIR_OLD,
+           WATERSCROLL_JMP, WATERSCROLL_CAVE_VADDR, WATERSCROLL_CAVE[mode])
 
     # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
     # (both sites still original at find time), then both edits applied -- so no re-find needed.

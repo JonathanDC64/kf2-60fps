@@ -126,6 +126,23 @@ cave redirects the clock load (`lw v0,0x2964(v0)` @ `0x80041a08`) and inserts `s
 **frame-synced read-only diff** (`tools/` framediff): at single-frame resolution the array entries
 showed the frame index cycling 0→1→2→3 in a halfword's high byte every frame.
 
+### WATER / scrolling-texture animation — CLUT scroll engine (`FUN_8003529x`)
+**(Previously deferred as "engine-limited" — solved once a VRAM scan revealed the mechanism; see
+§8 for the hunt.)** Water shimmer is **palette/CLUT scrolling**, not UV or sprite-frame animation.
+A VRAM diff found a 16×32 CLUT block at VRAM **(1008, 96)** whose rows **scroll vertically** each
+frame (row *y* takes row *y−1*'s colors). The driver `FUN_8003529x` walks a scroll descriptor
+(`s0`): `position(s0+2) += step(s0+1)`, wrapping at `max(s0+0x14)`, then DMAs the scrolled CLUT to
+VRAM via `FUN_80079e90`. `0x801aeb20` is that scroll position (a 0–31 row offset). It runs once per
+**rendered** frame, so at 60 fps it scrolls 4× too fast.
+
+Fix = gate **only the position advance** to every Nth frame, leaving the per-frame VRAM upload
+intact (so the texture still draws every frame — no flicker — it just scrolls ÷N). Redirect the
+step load `lbu v1,1(s0)` (@`0x80035278`) to a cave that forces `step = 0` unless
+`frame_ctr & (N−1) == 0`, then continues at the `addu`. This is the texture-scroll engine, *not*
+the character-animation engine (`FUN_80042eb0`) — so enemies/sword/NPCs are untouched. *(Found via
+`tools/redux_framediff.lua` + a VRAM diff of `/api/v1/gpu/vram/raw`; see §8 dead-ends for the
+several wrong turns first — UV scroll, sprite frame-cycling, and the character engine.)*
+
 ### ATTACK-BAR — weapon charge (`DAT_801b2502`, in `FUN_8002d2a0`)
 The idle recharge (delay timer `0x24f3` countdown + charge fill) runs every frame and sits
 behind a gate `bne v0,zero,...` where `v0 = (0x265c & 0x1870)`. The cave **folds the frame
@@ -275,12 +292,6 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 
 ## 6. Open / in progress
 
-- **Water / scrolling-texture animation** — *investigated deeply, deferred (engine-limited).*
-  Goal: slow all animated/scrolling textures ÷4. Conclusion: the animation is computed
-  **inline in the per-frame GTE / display-list build**, with **no tweakable RAM scroll
-  counter** to scale — so there is no clean one-instruction lever like every other system had.
-  See §8 for the full investigation and dead ends; revisit only with GPU/display-list-level
-  tooling.
 - **Enemy attack timing** (largely covered by the animation phase).
 - **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
   rescaled with a cave if a non-cosmetic bob is wanted.
@@ -297,6 +308,7 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Fall velocity | `0x801b2656` | signed halfword; `+0x28`/frame accel; terminal clamp `0x200` |
 | Ground level (landing) | `0x801e6474` | Y the collision routine snaps to on landing |
 | Player facing | `0x801b2612` | |
+| Water CLUT scroll pos | `0x801aeb20` | 0–31 row offset; engine `FUN_8003529x`, VRAM CLUT (1008,96) |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
 | Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |
 | Attack charge | `0x801b2502` | 0..5000 |
@@ -307,16 +319,21 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Controller buffer | `0x80007572` | active-low (Up = bit `0x10` clear) |
 | Code-cave gaps | `0x8007EF80`, `0x80081078` | inter-function padding, file-verified free |
 
-## 8. Water / animated-texture investigation (deferred)
+## 8. Water / animated-texture investigation (SOLVED — fix in §4 "WATER")
 
-**Goal:** scale *all* animated/scrolling textures (water, and any UV-scrolling surfaces) by
-÷4 so they animate at the original speed at 60 fps.
+> **Resolved.** Water is **CLUT scrolling**, and the fix gates its scroll-position advance ÷N (see
+> §4 "WATER"). The key that broke it open was a **VRAM diff** (`/api/v1/gpu/vram/raw`): it showed a
+> 16×32 CLUT block at VRAM (1008,96) scrolling vertically each frame, which led to the scroll
+> engine `FUN_8003529x` and its position counter `0x801aeb20`. The notes below are the long hunt
+> (and several wrong turns) that preceded that — kept so the dead ends aren't re-walked.
 
-**Conclusion:** unlike every other system, there is **no single RAM value or instruction** to
-scale. The texture animation is produced **inline in the per-frame GTE / display-list build**:
-each frame the renderer rebuilds the GPU primitives (vertices + texture coords) for the visible
-world, and any scroll/animation is baked into that rebuild via GTE math — not read from a
-persistent, tweakable counter. So the ÷4 techniques that worked elsewhere (scale a step, gate a
+**Goal:** scale *all* animated/scrolling textures (water) by ÷4 so they animate at original speed.
+
+**Early (wrong) conclusion — corrected by the VRAM diff:** it looked like there was **no single RAM
+value** to scale, because the animation isn't UV-scroll *or* a CPU palette buffer — it's a CLUT
+**scrolled in VRAM** (the CPU only advances a small row-offset counter + DMAs). CPU data-write
+watchpoints and main-RAM frame-diffs miss the VRAM scroll; the **VRAM diff** is what exposed it.
+The original inline-UV reasoning below was the misread:
 counter, redirect one load) have nothing to attach to. Revisit only with GPU/display-list-level
 tooling (e.g. a GPU command-stream inspector, or instrumenting the OT build).
 
@@ -367,9 +384,16 @@ tooling (e.g. a GPU command-stream inspector, or instrumenting the OT build).
    `FUN_80074910` vector×matrix mul). But gating that function ÷4 (run every 4th frame) made the
    **enemies, sword swing, and NPCs spaz out** while the water stayed fast — i.e. `FUN_80042eb0`
    animates *characters/effects*, and `0x801ad118` is its work buffer; the diff only caught it
-   because enemies/NPCs were near the water. **Do not gate `FUN_80042eb0`.** The actual water CLUT
-   is almost certainly rotated GPU-side (DMA / rotating CLUT pointer), invisible to CPU
-   watchpoints. **Conclusion stands: water is engine-limited; defer.**
+   because enemies/NPCs were near the water. **Do not gate `FUN_80042eb0`.** (The *actual* water
+   CLUT turned out to be a different, dedicated block at VRAM (1008,96) scrolled by `FUN_8003529x`
+   — see resolution below.)
+
+**RESOLUTION (what finally worked):** a **VRAM diff** of the texture area (`x≥320`) found the only
+non-framebuffer animation: a **16×32 CLUT block at (1008,96)** whose rows scroll vertically each
+frame. A write-watchpoint on its scroll counter `0x801aeb20` pinned the writer to `FUN_8003529x`
+(`position += step`, wrap at max, then `FUN_80079e90` DMAs the CLUT to VRAM). Gating just the
+position advance ÷N fixes it (§4 "WATER"). The lesson: **for PS1 texture animation, diff VRAM, not
+just main RAM** — the lever can be a tiny CPU-side scroll counter feeding a GPU DMA.
 
 **Tooling unlocked here (the lasting win):** PCSX-Redux **GDB** `Z2`/`Z4` data watchpoints do
 **not** fire on this build, and the Web API exposes no breakpoint/Lua endpoint — but a
