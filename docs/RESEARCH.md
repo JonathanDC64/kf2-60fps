@@ -311,7 +311,8 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 | Water CLUT scroll pos | `0x801aeb20` | 0–31 row offset; engine `FUN_8003529x`, VRAM CLUT (1008,96) |
 | Enemy move fn | `FUN_8004dbc8` | `enemy.pos += vx(s3)/vz(s0)` |
 | Enemy turn slew | `FUN_8004e928` | `obj[0x42] += obj[0x58]`; yaw `obj+0x42`, ang.vel `obj+0x58` |
-| Attack charge | `0x801b2502` | 0..5000 |
+| Swing animation arc | `0x801b25a4` | player attack-swing angle; `+= s2`/frame to `0xfff`; speed `s2` from weapon `[0x1c]`/`[0x24]`; fn `FUN_8002d2a0`, hit window base `0x801b25a8` |
+| Attack charge | `0x801b2502` | 0..5000 (weapon-charge bar, not the swing) |
 | Attack delay timer | `0x801b24f3` | |
 | Magic charge | `0x801b2506` | 0..5000, full to cast |
 | Magic delay timer | `0x801b24f4` | |
