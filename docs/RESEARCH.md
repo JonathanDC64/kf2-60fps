@@ -343,6 +343,17 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
   almost certainly a **script opcode**, so it isn't a plain spawn call. The 4× is likely that opcode
   (or its repeat-count `0x8001`) firing 4× under the changed vblank:frame ratio — **next: decompile
   the death script data + `FUN_8004f414` to find the loot/gold opcode and its count.**
+  **Exhausted the C-level chain (Ghidra, ~10 fns):** manager `FUN_80052e5c` (iterates the 200-enemy
+  `0x80185da8` array; per-enemy "think" `FUN_8004c1f0`/`FUN_8004c01c` are *gated* `frame&3==i&3`,
+  i.e. each enemy thinks every 4th logic frame — so at 60fps enemies think 4× more often in real
+  time, a cap side effect, but those fns are pure AI movement/targeting, no loot); setup
+  `FUN_8004da2c`; AI-animation `FUN_800500a8` (full state switch incl. death-done `LAB_80051d0c` →
+  `FUN_8004c104` which just sets `enemy[0xf]=0xff`); damage `FUN_8004c668`; death-state
+  `FUN_8004c0b0`/`FUN_8004c068`/`FUN_8004b94c`; script spawn `FUN_8004f414`. **The loot-spawn is in
+  none of them** — it's emitted by an **opcode in the per-enemy death-animation bytecode script**
+  (data in the `DAT_8018c7e8 + type*0x78` enemy-type tables, fetched by `FUN_8004c068(type,action)`).
+  Cracking it = RE the script-bytecode format + per-enemy death-script data (a data-driven
+  subsystem), not a function decompile. **Deferred as a deep, separate effort.**
 - **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
   rescaled with a cave if a non-cosmetic bob is wanted.
 
