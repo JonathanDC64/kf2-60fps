@@ -358,7 +358,18 @@ tooling (e.g. a GPU command-stream inspector, or instrumenting the OT build).
    too (`0x801AEB20`, a 0–31 cycle; `0x801A91B8`) — freeze-tested, none drive the water. So there
    is **no discrete water animation phase** in CPU RAM. Contrast the **fire**, which *was* a
    discrete sprite frame-index byte (§4 "ANIMATED BILLBOARDS") and so was fixable — water is
-   inline-UV/GPU-side and is not. **Conclusion stands: water is engine-limited; defer.**
+   inline-UV/GPU-side and is not.
+
+7. **The animating VRAM CLUT block → `FUN_80042eb0` is the *character* animation engine, not
+   water.** Spotting a palette/CLUT block animating in VRAM looked like the smoking gun (water as
+   palette rotation). A write-watchpoint on the changing palette-like buffer (`0x801ad118`) pinned
+   the writer to **`FUN_80042eb0`** — a colour-interpolation engine (calls the general-purpose
+   `FUN_80074910` vector×matrix mul). But gating that function ÷4 (run every 4th frame) made the
+   **enemies, sword swing, and NPCs spaz out** while the water stayed fast — i.e. `FUN_80042eb0`
+   animates *characters/effects*, and `0x801ad118` is its work buffer; the diff only caught it
+   because enemies/NPCs were near the water. **Do not gate `FUN_80042eb0`.** The actual water CLUT
+   is almost certainly rotated GPU-side (DMA / rotating CLUT pointer), invisible to CPU
+   watchpoints. **Conclusion stands: water is engine-limited; defer.**
 
 **Tooling unlocked here (the lasting win):** PCSX-Redux **GDB** `Z2`/`Z4` data watchpoints do
 **not** fire on this build, and the Web API exposes no breakpoint/Lua endpoint — but a
