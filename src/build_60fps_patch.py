@@ -29,6 +29,7 @@ Usage:
 See docs/RESEARCH.md for the full reverse-engineering write-up.
 """
 import argparse
+import math
 import sys
 import zlib
 
@@ -263,6 +264,24 @@ DROPEDGE_CAVE = {
                 0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,1
 }
 
+# --- FIELD OF VIEW (custom, optional --fov) -- the GTE projection distance H (cop2 ctrl reg 26)
+# sets the FOV. The scene-init FUN_80035394 does gte_SetGeomOffset(160,120) (screen 320x240, so
+# the projection centre/scale is 4:3) and gte_ldH(200) -> horizontal FOV = 2*atan(160/H), i.e.
+# H=200 -> ~77.3deg (the game default). LOWER H = WIDER FOV (H=160 -> 90deg, H=128 -> ~102deg).
+# H is loaded by the idiom `ori t0,zero,0xc8 / addu t4,t0,zero / ctc2 t4,H` at two sites in
+# FUN_80035394 (set-once at scene load; fog FUN_80035358 reads the live H, so it stays consistent).
+# We patch the 16-bit immediate (0x00c8) in BOTH occurrences. (Only applied when --fov is given;
+# pairs with DuckStation's 16:9 display aspect. The widescreen edge-culling fix is separate.)
+FOV_IDIOM = bytes.fromhex("c8000834" "21600001" "00d0cc48")  # li t0,200 / move t4,t0 / ctc2 t4,H(26)
+FOV_OFX = 160                       # OFX = screen half-width; horizontal FOV = 2*atan(OFX/H)
+FOV_H_DEFAULT = 200                 # the stock H (==0x00c8, the immediate we overwrite)
+
+
+def _fov_to_h(deg):
+    """Horizontal-FOV degrees -> GTE H (projection distance). Clamped to a sane 16-bit range."""
+    h = round(FOV_OFX / math.tan(math.radians(deg) / 2.0))
+    return max(24, min(0x3ff, h))
+
 # --- NOTIFICATION message display speed (3 byte edits, FUN @0x80042xxx) ---
 # Bottom-screen messages (pre-rendered text textures) animate via a per-frame phase machine on
 # bytes F7(phase)/F8(hold timer)/F9(ramp) @0x801aeaf7..f9:
@@ -430,8 +449,10 @@ def find_once(data, sig, name):
     return i
 
 
-def apply_patches(data, mode):
-    """Apply all 60 fps patches to `data` (a bytearray) in place. Returns nothing."""
+def apply_patches(data, mode, fov=None):
+    """Apply all 60 fps patches to `data` (a bytearray) in place. Returns nothing.
+
+    `fov` (optional) = custom horizontal field of view in degrees; rewrites the GTE H immediate."""
     c = find_once(data, CAP_SIG, "cap")
     for off in CAP_OFF:
         assert data[c + off] == 0x04, "cap byte mismatch"
@@ -589,6 +610,25 @@ def apply_patches(data, mode):
         data[idx + off:idx + off + 2] = new[mode].to_bytes(2, "little")
         print("%-14s @0x%X  0x%04x -> 0x%04x" % (name, idx + off, old_u16, new[mode]))
 
+    # FOV (optional): rewrite the GTE H immediate in every gte_ldH(200) site (both in the
+    # scene-init FUN_80035394). Lower H = wider FOV. Skipped entirely unless --fov is given.
+    if fov is not None:
+        h = _fov_to_h(fov)
+        n_fov, start = 0, 0
+        while True:
+            idx = data.find(FOV_IDIOM, start)
+            if idx < 0:
+                break
+            assert data[idx:idx + 2] == FOV_H_DEFAULT.to_bytes(2, "little"), "fov H imm mismatch"
+            data[idx:idx + 2] = h.to_bytes(2, "little")
+            n_fov += 1
+            start = idx + len(FOV_IDIOM)
+        if n_fov == 0:
+            raise SystemExit("ERROR: FOV H-load idiom not found (wrong dump?)")
+        eff = 2 * math.degrees(math.atan(FOV_OFX / h))
+        print("FOV        %d site(s)  H %d->%d  (~%.1f deg horizontal)" % (
+            n_fov, FOV_H_DEFAULT, h, eff))
+
 
 def make_bps(source, target):
     """Build a BPS patch (the changed bytes only -- no game code) from source->target.
@@ -638,9 +678,14 @@ def main(argv=None):
                     help="quarter = 60 fps + 1/4 speed (default); half = 30 fps + 1/2 speed")
     ap.add_argument("--bps", metavar="patch.bps",
                     help="also write a shareable BPS patch (contains only our edits)")
+    ap.add_argument("--fov", type=float, default=None, metavar="DEG",
+                    help="custom horizontal field of view in degrees (game default ~77; "
+                         "e.g. 90 for widescreen). Lower H/wider FOV; pairs with a 16:9 display.")
     ap.add_argument("--no-crc-check", action="store_true",
                     help="skip the source size/CRC verification")
     args = ap.parse_args(argv)
+    if args.fov is not None and not (40.0 <= args.fov <= 150.0):
+        ap.error("--fov must be between 40 and 150 degrees")
 
     source = bytearray(open(args.input, "rb").read())
 
@@ -653,9 +698,11 @@ def main(argv=None):
             print("  (continuing; patches are signature-located. Use --no-crc-check to silence.)")
 
     data = bytearray(source)
-    apply_patches(data, args.mode)
+    apply_patches(data, args.mode, args.fov)
     open(args.output, "wb").write(data)
-    print("wrote %s (%d bytes), mode=%s" % (args.output, len(data), args.mode))
+    print("wrote %s (%d bytes), mode=%s%s" % (
+        args.output, len(data), args.mode,
+        "" if args.fov is None else (", fov=%g deg" % args.fov)))
 
     if args.bps:
         bps = make_bps(bytes(source), bytes(data))

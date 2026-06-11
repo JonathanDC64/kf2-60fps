@@ -57,6 +57,9 @@ def make_fixture():
     buf[0:8] = b"PS-X EXE"                        # fake GAME.EXE anchor at base 0
     for _, (off, sig) in SIGS.items():
         buf[off:off + len(sig)] = sig
+    # two copies of the FOV H-load idiom (the real game has two gte_ldH(200) sites)
+    buf[0x1d00:0x1d00 + len(P.FOV_IDIOM)] = P.FOV_IDIOM
+    buf[0x1d40:0x1d40 + len(P.FOV_IDIOM)] = P.FOV_IDIOM
     return buf
 
 
@@ -140,6 +143,22 @@ def test_cave_redirects_and_bodies():
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp
+
+
+def test_fov_optional():
+    # no --fov: H immediates untouched
+    d = make_fixture()
+    P.apply_patches(d, "quarter")
+    assert d[0x1d00:0x1d00 + 2] == P.FOV_H_DEFAULT.to_bytes(2, "little")
+    assert d[0x1d40:0x1d40 + 2] == P.FOV_H_DEFAULT.to_bytes(2, "little")
+    # --fov 90 -> H=160, patched at BOTH sites
+    d = make_fixture()
+    P.apply_patches(d, "quarter", fov=90.0)
+    assert P._fov_to_h(90.0) == 160
+    assert d[0x1d00:0x1d00 + 2] == (160).to_bytes(2, "little")
+    assert d[0x1d40:0x1d40 + 2] == (160).to_bytes(2, "little")
+    # rest of the idiom (move t4,t0 / ctc2 t4,H) is preserved
+    assert d[0x1d00 + 4:0x1d00 + len(P.FOV_IDIOM)] == P.FOV_IDIOM[4:]
 
 
 def test_missing_signature_errors():
