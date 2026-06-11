@@ -351,6 +351,15 @@ tooling (e.g. a GPU command-stream inspector, or instrumenting the OT build).
    regions change (e.g. ≈px 960–1024, py 64–128) but couldn't be tied to a CPU-side lever
    (uploads are GPU DMA, invisible to CPU write-watchpoints).
 
+6. **Frame-synced diff at the water** (`tools/redux_framediff.lua`, single-frame resolution over
+   `0x80180000–0x801e0000`): the only things changing are (a) GTE/vertex clusters
+   (`0x8019Dxxx`, `0x801A5xxx`, `0x801ADxxx`) — the rebuilt water-surface polygons themselves (the
+   *symptom*, spans up to thousands), and (b) **global** counters present at non-water locations
+   too (`0x801AEB20`, a 0–31 cycle; `0x801A91B8`) — freeze-tested, none drive the water. So there
+   is **no discrete water animation phase** in CPU RAM. Contrast the **fire**, which *was* a
+   discrete sprite frame-index byte (§4 "ANIMATED BILLBOARDS") and so was fixable — water is
+   inline-UV/GPU-side and is not. **Conclusion stands: water is engine-limited; defer.**
+
 **Tooling unlocked here (the lasting win):** PCSX-Redux **GDB** `Z2`/`Z4` data watchpoints do
 **not** fire on this build, and the Web API exposes no breakpoint/Lua endpoint — but a
 **PCSX-Redux Lua `PCSX.addBreakpoint(addr,'Write',width, name, invoker)`** with a *custom invoker*
