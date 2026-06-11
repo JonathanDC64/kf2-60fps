@@ -321,6 +321,19 @@ Reverse engineering used [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux
 ## 6. Open / in progress
 
 - **Enemy attack timing** (largely covered by the animation phase).
+- **KNOWN ISSUE — enemies drop 4× items** (4 gold piles / 4 herbs instead of 1). Present since the
+  first capped build; reproduces even with **no overclock** (so it's not framerate — it's the
+  4-vblanks→1-vblank **CAP** change altering the vblank:logic-frame ratio from 4:1 to 1:1, the same
+  class as the menu/water "runs 4×" bugs). The drop-spawn almost certainly isn't edge-triggered.
+  *Not yet located* — resisted ~a dozen RE approaches. **Ruled out (don't re-walk):** the gold
+  amounts (24/5/13/24) don't cluster at any stride; the entity links at `0x80199xxx` are a
+  scattered linked-list pool (collect-diff is pure relink noise); `0x801ad118` is the *character*
+  colour-interp engine (`FUN_80042eb0`); `0x801e6488` is the **collision/spatial-query** result of
+  `FUN_80033f38` (the `0→4` was query flags, not a drop count); the 200-entry object array at
+  `0x80185da8` (stride `0x88`) doesn't gain gold objects on a kill (it's the collision/find array,
+  per `FUN_8004d644`). **Next approach:** single-step the enemy-death routine in a debugger, or
+  statically trace the enemy-AI death/loot code in Ghidra — the drops go to a pickup pool not yet
+  found. Pre/post captures `drop_pre.bin`/`drop_post.bin` (enemy alive vs 4 golds) exist for reuse.
 - **Proper head-bob ÷4** — currently disabled (cosmetic). Same N²-ish class as gravity; could be
   rescaled with a cave if a non-cosmetic bob is wanted.
 
