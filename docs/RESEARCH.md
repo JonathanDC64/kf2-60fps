@@ -110,6 +110,22 @@ clamp, fall-damage threshold, and damage amount all fire at the same real instan
 > `lh v1` wasn't consumed until an `addu` many instructions later). Any hand-written cave that
 > consumes a load result immediately must insert the load-delay `nop`.
 
+### ANIMATED BILLBOARDS / fire — sprite frame-cycling (`FUN_80040ae4`)
+The sprite renderer iterates an animation array at `0x80182968` (stride `0x18`); each animated
+sprite stores a `frame` index, `nframes`, and a `period`. A global clock `0x80182964` is bumped
+`+1`/frame, and a sprite advances its frame only when **`clock % period == 0`** (the `div`/`mfhi`
+at `0x80041a10`). Fire/flame sprites use **`period = 1`** → advance every frame → 4× too fast at
+60 fps.
+
+**The trap:** the obvious fix (divide the clock) is a **no-op for `period == 1`**, because
+`anything % 1 == 0` always — the gate fires every frame regardless of the clock value. (v17 did
+this and the fire never changed.) The correct fix is to multiply the **period**:
+`clock % (period*N) == 0` fires every `N*period` frames — ÷N for *all* periods, including 1. The
+cave redirects the clock load (`lw v0,0x2964(v0)` @ `0x80041a08`) and inserts `sll v1,v1,2`
+(period×4; ×2 for half) on the period register before the `div`. Found the cycling sprites with a
+**frame-synced read-only diff** (`tools/` framediff): at single-frame resolution the array entries
+showed the frame index cycling 0→1→2→3 in a halfword's high byte every frame.
+
 ### ATTACK-BAR — weapon charge (`DAT_801b2502`, in `FUN_8002d2a0`)
 The idle recharge (delay timer `0x24f3` countdown + charge fill) runs every frame and sits
 behind a gate `bne v0,zero,...` where `v0 = (0x265c & 0x1870)`. The cave **folds the frame

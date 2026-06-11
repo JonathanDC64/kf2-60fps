@@ -29,6 +29,7 @@ the cap).
 | Doors | open/close at the correct speed (full rotation over 4× the frames) |
 | Menus (inventory/shops) | capped at 60 FPS and cursor auto-repeat held at the right speed (taps stay instant) |
 | Gravity / falling | falls at the original speed (N² integration rescaled; fall damage preserved) |
+| Animated sprites (fire/flames) | texture-frame cycling ÷4 (billboard flames animate at the right speed) |
 
 Still in progress: water/scrolling-texture animation (engine-limited — see
 [docs/RESEARCH.md](docs/RESEARCH.md)).

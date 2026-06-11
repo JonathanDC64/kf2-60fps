@@ -183,6 +183,27 @@ GRAV_CAVE = {
     "half":    [0x3c03801b, 0x84632656, 0x00000000, 0x00031843, 0x0800bbb9, 0x00000000],  # sra,1
 }
 
+# --- ANIMATED BILLBOARDS / fire (FUN_80040ae4, the 200-object sprite renderer) ---
+# Each animated sprite advances its texture frame only when `global_clock % period == 0` (clock
+# @0x80182964 bumped +1/frame, per-sprite `period` = lbu -1(s0)). The fire (and other flames) use
+# period=1 -> advance EVERY frame, so at 60fps they cycle 4x too fast. Scaling the clock is a no-op
+# for period=1 (anything % 1 == 0), so instead multiply the PERIOD by N: `clock % (period*N) == 0`
+# advances every N*period frames -- correct for ALL periods incl. 1. Redirect the clock load
+# `lw v0,0x2964(v0)` (@0x80041a08) to a cave that loads the clock AND `sll v1,v1,k`'s the period
+# (v1) before the `div zero,v0,v1`. @0x80041a04: lui v0,0x8018 / lw v0,0x2964(v0) / nop / div.
+# (sll uses v1, not the just-loaded v0, so no load-delay nop is needed.)
+FIREANIM_SIG = bytes.fromhex(
+    "1880023c""6429428c""00000000""1a004300""02006014")
+FIREANIM_REDIR_OFF = 0x04          # `lw v0,0x2964(v0)` (6429428c) -> j cave
+FIREANIM_REDIR_OLD = "6429428c"
+FIREANIM_JMP = 0x08020446          # j 0x80081118
+FIREANIM_CAVE_VADDR = 0x80081118   # same 300-byte gap, past the gravity cave (ends 0x80081118)
+#   cave: lui v0,0x8018 / lw v0,0x2964(v0) / sll v1,v1,k (period*N) / j 0x80041a10 / nop
+FIREANIM_CAVE = {
+    "quarter": [0x3c028018, 0x8c422964, 0x00031880, 0x08010684, 0x00000000],  # sll v1,v1,2 (*4)
+    "half":    [0x3c028018, 0x8c422964, 0x00031840, 0x08010684, 0x00000000],  # sll v1,v1,1 (*2)
+}
+
 # --- ENEMY/NPC animation (FUN_8004db3c) -- the shared per-object animation-phase advance:
 # `obj[0x18] += step` (clamped [0,0xfff]; step = data[0x8], stored sign at obj+0x66), called
 # per-frame for every object in the update loop FUN_800500a8. At 60fps all enemy + NPC
@@ -356,6 +377,8 @@ def apply_patches(data, mode):
            SWING_CAVE[mode])
     inject("turnface", TURNFACE_SIG, TURNFACE_PATCH_OFF, "58000296", TURNFACE_JMP,
            TURNFACE_CAVE_VADDR, TURNFACE_CAVE[mode])
+    inject("fireanim", FIREANIM_SIG, FIREANIM_REDIR_OFF, FIREANIM_REDIR_OLD, FIREANIM_JMP,
+           FIREANIM_CAVE_VADDR, FIREANIM_CAVE[mode])
 
     # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
     # (both sites still original at find time), then both edits applied -- so no re-find needed.
