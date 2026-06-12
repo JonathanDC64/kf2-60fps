@@ -61,8 +61,6 @@ def build():
     # ---- same-size byte / word / u16 edits ----
     edit("cap", P.CAP_SIG, [{"off": o, "w": 1, "old": 0x04, "new": per_mode(P.CAP_NEW)}
                             for o in P.CAP_OFF])
-    edit("bob", P.BOB_SIG, [{"off": P.BOB_OFF, "w": 1, "old": 0x22,
-                             "new": {"quarter": 0x20, "half": 0x20}}])
     edit("walk", P.WALK_SIG, [{"off": o, "w": 1, "old": 0x03, "new": per_mode(P.WALK_NEW)}
                               for o in P.WALK_OFF])
     edit("turn", P.TURN_SIG, [
@@ -141,6 +139,13 @@ def build():
     # ---- patched by absolute vaddr, not signature search (the menu flush copy) ----
     m["menucap"] = {"vaddr": P.MENUCAP_VADDR, "sig": hx(P.MENUCAP_SIG), "off": P.MENUCAP_OFF,
                     "old": "%08x" % P.MENUCAP_OLD, "new": "%08x" % P.MENUCAP_NEW}
+
+    # ---- parameterised: head-bob (--bob on=fix / off=disable) ----
+    m["bob"] = {
+        "fix": {"sig": hx(P.BOBFIX_SIG),
+                "new": {"quarter": hx(P.BOBFIX_NEW["quarter"]), "half": hx(P.BOBFIX_NEW["half"])}},
+        "off": {"sig": hx(P.BOB_SIG), "off": P.BOB_OFF},
+    }
 
     # ---- parameterised: FOV (--fov) and widescreen culling (--cull) ----
     m["fov"] = {

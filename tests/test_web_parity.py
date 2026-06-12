@@ -29,11 +29,13 @@ MANIFEST = os.path.join(ROOT, "docs", "patches.json")
 DRIVER = os.path.join(HERE, "run_engine_node.js")
 
 CONFIGS = [
-    ("quarter", None, None),     # default 60 fps build
-    ("half", None, None),        # 30 fps
-    ("quarter", 90.0, None),     # --fov 90 (cull auto-on)
-    ("quarter", None, True),     # --cull on, stock FOV (the recommended widescreen build)
-    ("quarter", 100.0, False),   # --fov 100 --cull off
+    ("quarter", None, None, "on"),     # default 60 fps build (head-bob fixed)
+    ("half", None, None, "on"),        # 30 fps
+    ("quarter", 90.0, None, "on"),     # --fov 90 (cull auto-on)
+    ("quarter", None, True, "on"),     # --cull on, stock FOV (the recommended widescreen build)
+    ("quarter", 100.0, False, "on"),   # --fov 100 --cull off
+    ("quarter", None, None, "off"),    # --bob off (head-bob disabled)
+    ("half", None, None, "off"),       # --bob off, 30 fps
 ]
 
 
@@ -46,10 +48,10 @@ def test_manifest_is_fresh():
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("mode,fov,cull", CONFIGS)
-def test_engine_parity(mode, fov, cull, tmp_path):
+@pytest.mark.parametrize("mode,fov,cull,bob", CONFIGS)
+def test_engine_parity(mode, fov, cull, bob, tmp_path):
     target = make_fixture()
-    P.apply_patches(target, mode, fov, cull)
+    P.apply_patches(target, mode, fov, cull, bob)
 
     fixture = tmp_path / "fixture.bin"
     fixture.write_bytes(bytes(make_fixture()))
@@ -58,11 +60,11 @@ def test_engine_parity(mode, fov, cull, tmp_path):
         [NODE, DRIVER, str(fixture), MANIFEST, mode,
          "null" if fov is None else str(fov),
          "null" if cull is None else ("true" if cull else "false"),
-         str(out)],
+         bob, str(out)],
         check=True, cwd=HERE)
 
     assert out.read_bytes() == bytes(target), \
-        "engine.js output differs from apply_patches (%s fov=%s cull=%s)" % (mode, fov, cull)
+        "engine.js output differs from apply_patches (%s fov=%s cull=%s bob=%s)" % (mode, fov, cull, bob)
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
@@ -77,7 +79,7 @@ def test_bps_parity(tmp_path):
     fixture.write_bytes(bytes(make_fixture()))
     out = tmp_path / "out.bin"
     bps = tmp_path / "out.bps"
-    subprocess.run([NODE, DRIVER, str(fixture), MANIFEST, "quarter", "null", "null",
+    subprocess.run([NODE, DRIVER, str(fixture), MANIFEST, "quarter", "null", "null", "on",
                     str(out), str(bps)], check=True, cwd=HERE)
     assert bps.read_bytes() == py_bps, "engine.js makeBps differs from make_bps"
 

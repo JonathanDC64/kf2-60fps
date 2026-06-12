@@ -41,10 +41,24 @@ SRC_CRC32 = 0xF8A4C585
 SRC_MD5 = "bf503b25c229ae048127a16679396d17"
 SRC_SHA1 = "131d2574f6ea101823193845f001bb58cdd3ed5e"
 
-# --- BOB: head-bob disable (FUN_8002ed60): `sh v0,0x2650` -> `sh zero,0x2650`. ---
+# --- BOB: head-bob (FUN_8002ed60 @LAB_8002f270). When walking, a phase DAT_801b2652 advances by the
+# walk-step rate DAT_801b264a each frame and the camera bob = f(rsin(phase)). At 60fps the phase
+# advances 4x too fast -> the bob oscillates 4x too fast. Two ways to handle it:
+#   * FIX (default): scale the phase increment /N so the bob runs at the original frequency (amplitude
+#     unchanged). The add `phase += incr` sits behind a load-delay nop (`lhu v0,0x264a; nop; addu`),
+#     so we can't just shift v0 in the nop slot (R3000 load delay). Instead we REORDER the two load
+#     pairs (load the increment first) which frees that slot for `sra v0,v0,N` with no hazard:
+#       lui v0/lhu v0,0x264a/lui a0/lhu a0,0x2652/sra v0,v0,N/addu a0,a0,v0
+#   * OFF (--bob off): the original disable -- store 0 to the bob output `sh v0,0x2650` -> `sh zero`.
+BOBFIX_SIG = bytes.fromhex("1b80043c" "52268494" "1b80023c" "4a264294" "00000000" "21208200")
+# old: lui a0 / lhu a0,0x2652(a0) / lui v0 / lhu v0,0x264a(v0) / nop / addu a0,a0,v0
+BOBFIX_NEW = {  # reordered + sra v0,v0,N (N=2 quarter, 1 half): lui v0/lhu v0/lui a0/lhu a0/sra/addu
+    "quarter": bytes.fromhex("1b80023c" "4a264294" "1b80043c" "52268494" "83100200" "21208200"),
+    "half":    bytes.fromhex("1b80023c" "4a264294" "1b80043c" "52268494" "43100200" "21208200"),
+}
 BOB_SIG = bytes.fromhex(
     "23106200""1b80013c""502622a4""bdbc0008""00000000""1b80013c""502620a4")
-BOB_OFF = 0x0a          # rt byte of `sh v0,0x2650`: 0x22 (v0) -> 0x20 (zero)
+BOB_OFF = 0x0a          # rt byte of `sh v0,0x2650`: 0x22 (v0) -> 0x20 (zero) -- the --bob off disable
 
 # --- CAP: framerate cap (FUN_80019614): two `sltiu v0,v0,0x4`, imm 4 -> N. ---
 CAP_SIG = bytes.fromhex(
@@ -537,21 +551,28 @@ def find_once(data, sig, name):
     return i
 
 
-def apply_patches(data, mode, fov=None, cull=None):
+def apply_patches(data, mode, fov=None, cull=None, bob="on"):
     """Apply all 60 fps patches to `data` (a bytearray) in place. Returns nothing.
 
     `fov` (optional) = custom horizontal field of view in degrees; rewrites the GTE H immediate.
-    `cull` (optional) = widescreen edge-culling fix: True/False to force, None = auto (on iff fov)."""
+    `cull` (optional) = widescreen edge-culling fix: True/False to force, None = auto (on iff fov).
+    `bob`  = head-bob: "on" (default) = run at the correct (scaled) speed; "off" = disabled."""
     c = find_once(data, CAP_SIG, "cap")
     for off in CAP_OFF:
         assert data[c + off] == 0x04, "cap byte mismatch"
         data[c + off] = CAP_NEW[mode]
     print("CAP        @0x%X,0x%X  cap 4->%d" % (c + CAP_OFF[0], c + CAP_OFF[1], CAP_NEW[mode]))
 
-    b = find_once(data, BOB_SIG, "bob")
-    assert data[b + BOB_OFF] == 0x22, "bob byte mismatch"
-    data[b + BOB_OFF] = 0x20
-    print("BOB        @0x%X  disabled" % (b + BOB_OFF))
+    if bob == "off":
+        b = find_once(data, BOB_SIG, "bob")
+        assert data[b + BOB_OFF] == 0x22, "bob byte mismatch"
+        data[b + BOB_OFF] = 0x20
+        print("BOB        @0x%X  head-bob OFF (output zeroed)" % (b + BOB_OFF))
+    else:
+        bf = find_once(data, BOBFIX_SIG, "bobfix")
+        data[bf:bf + len(BOBFIX_NEW[mode])] = BOBFIX_NEW[mode]
+        print("BOB        @0x%X  head-bob phase /%d (correct-speed bob)" % (
+            bf, 4 if mode == "quarter" else 2))
 
     w = find_once(data, WALK_SIG, "walk")
     for off in WALK_OFF:
@@ -828,6 +849,10 @@ def main(argv=None):
                          "on/off overrides that. Known limitation: the cone is bounded by KF2's "
                          "fixed visibility grid, so a small rotation margin remains and edge "
                          "geometry can pop slightly during fast turns.")
+    ap.add_argument("--bob", choices=("on", "off"), default="on",
+                    help="head-bob (camera bob while walking). on (default) = runs at the correct "
+                         "original speed (scaled for 60fps); off = disabled entirely (the camera "
+                         "stays level). Default: on.")
     ap.add_argument("--no-crc-check", action="store_true",
                     help="skip the source size/CRC verification")
     args = ap.parse_args(argv)
@@ -854,12 +879,13 @@ def main(argv=None):
             print("VERIFIED   %s  size/crc32/md5/sha1 all match" % SRC_SERIAL)
 
     data = bytearray(source)
-    apply_patches(data, args.mode, args.fov, cull)
+    apply_patches(data, args.mode, args.fov, cull, args.bob)
     open(args.output, "wb").write(data)
-    print("wrote %s (%d bytes), mode=%s%s%s" % (
+    print("wrote %s (%d bytes), mode=%s%s%s%s" % (
         args.output, len(data), args.mode,
         "" if args.fov is None else (", fov=%g deg" % args.fov),
-        "" if args.cull is None else (", cull=%s" % args.cull)))
+        "" if args.cull is None else (", cull=%s" % args.cull),
+        "" if args.bob == "on" else ", bob=off"))
 
     if args.bps:
         bps = make_bps(bytes(source), bytes(data))

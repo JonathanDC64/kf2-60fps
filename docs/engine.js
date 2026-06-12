@@ -103,6 +103,20 @@
     writeLE(buf, mcbin + mc.off, parseInt(mc.new, 16), 4);
     log.push("menucap");
 
+    // ---- HEAD-BOB: "on" (default) = scale the phase /N (correct-speed bob); "off" = zero output ----
+    var bob = (opts.bob === undefined || opts.bob === null) ? "on" : opts.bob;
+    var bb = manifest.bob;
+    if (bob === "off") {
+      var bo = bb.off, oi = findOnce(buf, hexToBytes(bo.sig), lo, hi, "bob");
+      if (buf[oi + bo.off] !== 0x22) throw new Error("bob byte mismatch");
+      buf[oi + bo.off] = 0x20;
+    } else {
+      var bx = bb.fix, fi = findOnce(buf, hexToBytes(bx.sig), lo, hi, "bobfix");
+      var nbob = hexToBytes(bx.new[mode]);
+      for (var bk = 0; bk < nbob.length; bk++) buf[fi + bk] = nbob[bk];
+    }
+    log.push("bob(" + bob + ")");
+
     // ---- FOV (--fov): rewrite the GTE H immediate at every gte_ldH site + recalibrate fog H ----
     if (fov !== null) {
       var f = manifest.fov, idiom = hexToBytes(f.idiom), h = fovToH(fov, f.ofx);

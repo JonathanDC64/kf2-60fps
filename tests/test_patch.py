@@ -64,6 +64,7 @@ def make_fixture():
     buf[0x1e00:0x1e00 + len(P.CULL_SIG)] = P.CULL_SIG   # PVS cone half-angle site
     buf[0x1f00:0x1f00 + len(P.FOGH_SIG)] = P.FOGH_SIG    # fog calibration H site
     buf[0x2000:0x2000 + len(P.NEARBAND_SIG)] = P.NEARBAND_SIG   # near-band (threshold + cone check)
+    buf[0x2300:0x2300 + len(P.BOBFIX_SIG)] = P.BOBFIX_SIG       # head-bob phase block (--bob on/fix)
     return buf
 
 
@@ -71,7 +72,9 @@ def test_quarter_byte_edits():
     d = make_fixture()
     P.apply_patches(d, "quarter")
     assert d[0x100] == 0x01 and d[0x100 + 0x20] == 0x01            # CAP 4->1
-    assert d[0x200 + P.BOB_OFF] == 0x20                            # BOB
+    # BOB default = on (fixed): phase block reordered+scaled at 0x2300; output store left intact
+    assert d[0x2300:0x2300 + len(P.BOBFIX_NEW["quarter"])] == P.BOBFIX_NEW["quarter"]
+    assert d[0x200 + P.BOB_OFF] == 0x22                            # bob output NOT zeroed (on)
     assert d[0x300 + 4] == 0x83 and d[0x300 + 0x34] == 0x83        # WALK >>0xe
     assert d[0x400 + 0x0c] == 0x08 and d[0x400 + 0x28] == 0x0a     # TURN
     assert d[0x500] == 0xf0                                        # MAGIC-DELAY 60->240
@@ -124,6 +127,20 @@ def test_half_mode():
     for look_off in (0x2100, 0x2200):                              # LOOK pitch advance ÷2 (sra v1,v0,1)
         assert int.from_bytes(d[look_off + P.LOOK_OFF:look_off + P.LOOK_OFF + 4], "little") == \
             P.LOOK_NEW["half"]
+    assert d[0x2300:0x2300 + len(P.BOBFIX_NEW["half"])] == P.BOBFIX_NEW["half"]   # bob phase ÷2
+
+
+def test_bob_option():
+    # default / "on": head-bob fixed (phase block patched), output store left intact
+    d = make_fixture()
+    P.apply_patches(d, "quarter", bob="on")
+    assert d[0x2300:0x2300 + len(P.BOBFIX_NEW["quarter"])] == P.BOBFIX_NEW["quarter"]
+    assert d[0x200 + P.BOB_OFF] == 0x22
+    # "off": head-bob disabled (output zeroed), phase block left stock
+    d2 = make_fixture()
+    P.apply_patches(d2, "quarter", bob="off")
+    assert d2[0x200 + P.BOB_OFF] == 0x20                            # sh v0 -> sh zero
+    assert d2[0x2300:0x2300 + len(P.BOBFIX_SIG)] == P.BOBFIX_SIG    # phase block untouched
 
 
 def test_cave_redirects_and_bodies():

@@ -20,7 +20,7 @@ the cap).
 | Frame cap | 15 FPS → **60 FPS** (`quarter`) or 30 FPS (`half`) |
 | Player walk / turn | scaled ÷4 (÷2 in half mode) |
 | Vertical camera (look up/down) | pitch advance scaled ÷4 (÷2 in half mode) — turning/yaw already covered above |
-| Head-bob | disabled (cosmetic; ran too fast) |
+| Head-bob | walks at the original speed (phase scaled ÷4); `--bob off` disables it entirely |
 | Enemy movement | ÷4, with rounding so slow/diagonal enemies aren't starved |
 | Attack bar (weapon charge) | recharges ÷4 (correct attack cadence) |
 | Magic stamina gauge | fills ÷4, and its refill **delay** matches the attack bar |
@@ -35,7 +35,7 @@ the cap).
 | Notification messages | appear/hold/fade ÷4 (bottom-screen text stays readable, not a flash) |
 | Item pickup | move-in/spin/fast-spin/return ÷4 (the pickup display plays at the right speed) |
 
-Optional/cosmetic only: a non-cosmetic head-bob (currently disabled). See
+The walking head-bob is on by default at the correct speed; pass `--bob off` to disable it. See
 [docs/RESEARCH.md](docs/RESEARCH.md) for the full reverse-engineering write-up.
 
 ## Web patcher (no install)
@@ -78,6 +78,8 @@ Options:
                       Known issue: at a wide FOV, distant geometry at the far left/right can't be
                       fully fogged (KF2's fog is forward-Z based) and may pop. For clean widescreen,
                       prefer the stock FOV with --cull on.
+--bob on|off          head-bob while walking. on (default) = runs at the correct original speed
+                      (scaled for 60fps); off = disabled (camera stays level). Default: on.
 --bps patch.bps       also write a shareable BPS patch (contains only our edits, no game code)
 --no-crc-check        skip the source size/CRC verification
 ```

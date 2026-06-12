@@ -8,7 +8,7 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var fileInput = $("fileInput"), drop = $("drop"), forge = $("forge"), status = $("status");
-  var downloads = $("downloads"), cull = $("cull"), fovEnable = $("fovEnable");
+  var downloads = $("downloads"), cull = $("cull"), fovEnable = $("fovEnable"), bobOff = $("bobOff");
   var fov = $("fov"), fovVal = $("fovVal"), fovRow = $("fovRow"), wantBps = $("wantBps");
   var fovReset = $("fovReset");
   var FOV_DEFAULT = 77;            // the game's stock horizontal FOV (shown for reference)
@@ -108,7 +108,8 @@
   function doForge() {
     if (!srcBytes || !manifest) return;
     var mode = document.querySelector('input[name=mode]:checked').value;
-    var opts = { cull: cull.checked ? true : null, fov: fovEnable.checked ? parseFloat(fov.value) : null };
+    var opts = { cull: cull.checked ? true : null, fov: fovEnable.checked ? parseFloat(fov.value) : null,
+                 bob: bobOff.checked ? "off" : "on" };
     forge.disabled = true; clearUrls(); downloads.innerHTML = ""; downloads.classList.remove("show");
     setStatus("Forging… (large file — this can take a few seconds)");
 

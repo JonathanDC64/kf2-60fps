@@ -787,3 +787,31 @@ the recommended widescreen mode and `--fov` is flagged **experimental**.
 | Object visibility | `FUN_80040694` / `FUN_80040708` | PVS lookup; 0 = culled |
 | Dungeon cell grid | `DAT_801d4464` | 80×80, 10 bytes/cell, stride 800 |
 | Render driver / loop | `FUN_800422b8` / `FUN_80014bd4` | per-frame render / main game loop |
+
+## 14. Player camera — vertical look (pitch) and head-bob
+
+Both are per-frame and were 4× too fast at 60 fps; both were the *last* camera-control scalings to land.
+
+### 14.1 Vertical look / pitch (`LOOK`, `FUN_8002f5c0`)
+The look handler scales **yaw** via the shared `TURN` step `DAT_801b2668` (already ÷4), but **pitch**
+uses a *separate* hardcoded velocity `DAT_801b264e` (ramp ±3, clamp ±0x20) that `TURN` never touched.
+The pitch angle `DAT_801b2610` is advanced by `pitch += velocity` at two sites (look up `blez`-guarded
+@`0x8002f92c`, look down `bgez`-guarded @`0x8002f974`); each copies the velocity to v1 via
+`addu v1,v0,zero` first. We change that copy to `sra v1,v0,N` (N=2 quarter / 1 half) → the pitch
+advances ¼ (½) per frame: correct max look speed, the accel ramp/clamp feel preserved.
+
+### 14.2 Head-bob (`BOB`, `FUN_8002ed60` @`LAB_8002f270`)
+Walking, a phase `DAT_801b2652` advances by the walk-step rate `DAT_801b264a` each frame and the
+camera bob `DAT_801b2650 = f(rsin(phase))`. At 60 fps the phase runs 4× too fast → bob oscillates 4×
+too fast (the original stopgap just *disabled* it). **Fix (`--bob on`, default):** scale the phase
+increment ÷N. The add sits behind an R3000 load-delay nop (`lhu v0,0x264a; nop; addu a0,a0,v0`), so
+we can't shift `v0` in the nop slot; instead we **reorder the two load pairs** (load the increment
+first) which frees that slot for `sra v0,v0,N` with no hazard. Frequency corrected, amplitude
+unchanged. **`--bob off`:** the original disable — store 0 to the bob output `sh v0,0x2650 → sh zero`.
+
+| Name | Address | Notes |
+| --- | --- | --- |
+| Look handler | `FUN_8002f5c0` | yaw via `DAT_801b2668`; pitch velocity `DAT_801b264e` → angle `DAT_801b2610` |
+| Pitch apply sites | `0x8002f92c` / `0x8002f974` | `addu v1,v0,zero` → `sra v1,v0,N` (up / down) |
+| Head-bob | `FUN_8002ed60` @`0x8002f298` | phase `DAT_801b2652` += `DAT_801b264a`; reorder+`sra` to scale |
+| Bob output | `0x8002f2e0` | `sh v0,0x2650` → `sh zero` for `--bob off` |
