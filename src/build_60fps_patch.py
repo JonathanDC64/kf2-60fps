@@ -282,6 +282,68 @@ def _fov_to_h(deg):
     h = round(FOV_OFX / math.tan(math.radians(deg) / 2.0))
     return max(24, min(0x3ff, h))
 
+
+# --- WIDESCREEN CULLING (applied with --fov) -- the PVS (potentially-visible-set) builder
+# FUN_80034bf4 marks which dungeon cells are visible by casting a view cone of half-angle 0x1b8
+# (KF2 units, 0x1000 = 360deg -> 38.7deg half = 77.3deg total == the stock render FOV) across a
+# 25x25 grid (DAT_801aec84). BOTH the wall renderer (FUN_8003bfd0) and the object renderer
+# (FUN_80040694/FUN_80040708) draw only cells flagged visible there -- so with a wider FOV and/or
+# a 16:9 display, cells in the new edge band stay unflagged and pop in/out. We widen the cone half-
+# angle to cover the chosen FOV on a 16:9 display + a rotation margin. The angle is the immediate
+# of `addiu s5,v0,0x1b8` @0x80034c80 (s5 = (pitch_term>>10) + 0x1b8); we rewrite the 0x01b8.
+CULL_SIG = bytes.fromhex("ff034224" "83120200" "b8015524" "68db010c")  # addiu v0,0x3ff/sra/addiu s5,v0,0x1b8/jal
+CULL_OFF = 0x08                     # the 16-bit immediate (0x01b8) of `addiu s5,v0,0x1b8`
+CULL_STOCK = 0x01b8                 # 38.7deg half-angle == 77.3deg total (the stock view cone)
+
+# --- CULL draw-distance scaling -- FUN_80034bf4 shortens the visible draw distance for WIDE cones:
+# `if (cone_half >= 0x258) uVar21 = drawdist^2 * cos(cone_half/2)` (a cell-count limiter). Widening
+# the cull cone trips this, so the CENTER draw distance shrinks vs stock (~13->12 cells = geometry
+# culls closer straight ahead). We disable it by forcing the `slti v0,s5,0x258` @0x80034dd0 always
+# true (s5 = cone half-angle, max ~0x3a0), so uVar21 stays the full stock drawdist^2 regardless of
+# cone width -- the cone is then purely an angular cull, not a distance cut. @0x80034dd0.
+CULLSCALE_SIG = bytes.fromhex("12100000" "21986200" "5802a22a" "08004010" "21f06401")  # mflo/addu/slti s5,0x258/beq/addu
+CULLSCALE_OFF = 0x08                # the `slti v0,s5,0x258` immediate (0x0258) -> always-true threshold
+CULLSCALE_NEW = 0x4000              # s5 < 0x4000 always (signed, positive) -> never scale the distance
+
+
+CULL_STOCK_FOV = 77.3               # stock horizontal FOV (H=200) -- used when culling w/o --fov
+
+
+def _fov_to_cull_half(deg):
+    """PVS cone half-angle (KF2 units) covering `deg` horizontal FOV on a 16:9 display + margin."""
+    half_deg = (deg / 2.0) * (4.0 / 3.0) + 12.0     # 4:3->16:9 widen (DuckStation WS), +12deg margin
+    units = round(half_deg * 4096.0 / 360.0)
+    return max(CULL_STOCK, min(0x3a0, units))        # never narrower than stock; cap < 90deg half
+
+
+# --- FOG calibration H (applied with --fov) -- the GTE depth-cue fog (distant geometry fades to the
+# near-black FarColor) is calibrated by FUN_80035358's `SetFogNear(a, 200)` @0x80035380. The 200 is
+# the projection H the fog math assumes; the GTE actually projects with our patched H, so a changed
+# FOV leaves the fog computed for the wrong H -> distant geometry under-fogged and popping at the
+# wide edges. We rewrite this 0xc8 to match the render H so DQA/DQB track the real projection.
+FOGH_SIG = bytes.fromhex("ffff0434" "b6de010c" "c8000534" "1000bf8f")  # li a0,-1/jal SetFogNear/li a1,200/lw ra
+FOGH_OFF = 0x08                     # the 16-bit immediate (0xc8=200) of `ori a1,zero,0xc8`
+FOGH_STOCK = 200
+
+# --- BOTTOM-CORNER fix -- the PVS builder's NEAR band (`uVar9 < 5` cells, i.e. within ~2.2 of the
+# camera) is drawn unconditionally-ish but STILL cone-tested, so floor/walls point-blank to the
+# SIDES (the screen's bottom corners at a wide FOV, near 90deg) get culled. Two edits: (1) widen the
+# near band `sltiu v0,v1,5` @0x80034ea4 to a bigger always-near radius; (2) NOP its two cone-check
+# branches `bgtz a0` @0x80034eb0 / `bltz a1` @0x80034eb8 so the whole near disc is always drawn.
+# @0x80034ea4: sltiu v0,v1,5 / beq / nop / bgtz a0,cull / nop / bltz a1,cull / li v0,0x1e
+NEARBAND_SIG = bytes.fromhex(
+    "0500622c" "07004010" "00000000" "1300801c" "00000000" "1100a004" "1e000234")
+NEARBAND_THRESH_OFF = 0x00          # `sltiu v0,v1,5` immediate -> bigger near radius
+NEARBAND_THRESH_NEW = 0x24          # dist^2 < 0x24 (~6 cells) always-near (covers point-blank corners)
+NEARBAND_NOP1_OFF = 0x0c            # `bgtz a0,cull` -> nop
+NEARBAND_NOP2_OFF = 0x14            # `bltz a1,cull` -> nop
+
+# Note: the "far band" ring (cells `uVar9 < 0x100` beyond the visible band, drawn with no cone test)
+# is deliberately LEFT ALONE. Straight ahead those cells are the black backdrop (huge forward-Z ->
+# fully fogged) that hides the draw-distance edge; trimming them exposes the edge as center popping.
+# The distant *side* popping (those same cells at a wide angle, where forward-Z is small so the
+# depth fog can't reach them) is an inherent limit of KF2's forward-Z fog at a wide FOV.
+
 # --- NOTIFICATION message display speed (3 byte edits, FUN @0x80042xxx) ---
 # Bottom-screen messages (pre-rendered text textures) animate via a per-frame phase machine on
 # bytes F7(phase)/F8(hold timer)/F9(ramp) @0x801aeaf7..f9:
@@ -449,10 +511,11 @@ def find_once(data, sig, name):
     return i
 
 
-def apply_patches(data, mode, fov=None):
+def apply_patches(data, mode, fov=None, cull=None):
     """Apply all 60 fps patches to `data` (a bytearray) in place. Returns nothing.
 
-    `fov` (optional) = custom horizontal field of view in degrees; rewrites the GTE H immediate."""
+    `fov` (optional) = custom horizontal field of view in degrees; rewrites the GTE H immediate.
+    `cull` (optional) = widescreen edge-culling fix: True/False to force, None = auto (on iff fov)."""
     c = find_once(data, CAP_SIG, "cap")
     for off in CAP_OFF:
         assert data[c + off] == 0x04, "cap byte mismatch"
@@ -610,8 +673,8 @@ def apply_patches(data, mode, fov=None):
         data[idx + off:idx + off + 2] = new[mode].to_bytes(2, "little")
         print("%-14s @0x%X  0x%04x -> 0x%04x" % (name, idx + off, old_u16, new[mode]))
 
-    # FOV (optional): rewrite the GTE H immediate in every gte_ldH(200) site (both in the
-    # scene-init FUN_80035394). Lower H = wider FOV. Skipped entirely unless --fov is given.
+    # FOV (optional, --fov): rewrite the GTE H immediate in every gte_ldH(200) site (both in the
+    # scene-init FUN_80035394), and recalibrate the depth-cue fog H to match. Skipped unless --fov.
     if fov is not None:
         h = _fov_to_h(fov)
         n_fov, start = 0, 0
@@ -628,6 +691,50 @@ def apply_patches(data, mode, fov=None):
         eff = 2 * math.degrees(math.atan(FOV_OFX / h))
         print("FOV        %d site(s)  H %d->%d  (~%.1f deg horizontal)" % (
             n_fov, FOV_H_DEFAULT, h, eff))
+
+        # Recalibrate the depth-cue fog for the new projection H (else distant geometry pops).
+        fi = find_once(data, FOGH_SIG, "fogh")
+        assert data[fi + FOGH_OFF:fi + FOGH_OFF + 2] == FOGH_STOCK.to_bytes(2, "little"), \
+            "fogh imm mismatch"
+        data[fi + FOGH_OFF:fi + FOGH_OFF + 2] = h.to_bytes(2, "little")
+        print("FOG-H      @0x%X  %d->%d  (match projection so depth fog tracks the FOV)" % (
+            fi + FOGH_OFF, FOGH_STOCK, h))
+
+    # WIDESCREEN CULLING (--cull wins; otherwise auto-on when --fov is set). Widens the PVS view
+    # cone + near band and trims the far ring so walls/objects/floor stop popping at the 16:9 edges.
+    do_cull = cull if cull is not None else (fov is not None)
+    if do_cull:
+        eff_fov = fov if fov is not None else CULL_STOCK_FOV
+        half = _fov_to_cull_half(eff_fov)
+        ci = find_once(data, CULL_SIG, "cull")
+        assert data[ci + CULL_OFF:ci + CULL_OFF + 2] == CULL_STOCK.to_bytes(2, "little"), \
+            "cull imm mismatch"
+        data[ci + CULL_OFF:ci + CULL_OFF + 2] = half.to_bytes(2, "little")
+        print("CULL       @0x%X  PVS half-angle 0x%x->0x%x  (~%.0f deg cone, 16:9 of %.0f deg FOV)" % (
+            ci + CULL_OFF, CULL_STOCK, half, half * 360.0 / 4096.0 * 2, eff_fov))
+
+        # Bottom corners: widen the always-near disc + NOP its cone-check branches.
+        ni = find_once(data, NEARBAND_SIG, "nearband")
+        assert data[ni + NEARBAND_THRESH_OFF] == 0x05, "nearband thresh mismatch"
+        data[ni + NEARBAND_THRESH_OFF:ni + NEARBAND_THRESH_OFF + 2] = \
+            NEARBAND_THRESH_NEW.to_bytes(2, "little")
+        data[ni + NEARBAND_NOP1_OFF:ni + NEARBAND_NOP1_OFF + 4] = bytes(4)
+        data[ni + NEARBAND_NOP2_OFF:ni + NEARBAND_NOP2_OFF + 4] = bytes(4)
+        print("NEAR-BAND  @0x%X  near radius 5->0x%x + cone check nop (point-blank corners)" % (
+            ni + NEARBAND_THRESH_OFF, NEARBAND_THRESH_NEW))
+
+        # Keep the full stock draw distance: disable the wide-cone cos() distance scaling so the
+        # widened cull cone doesn't shorten how far you see straight ahead.
+        si = find_once(data, CULLSCALE_SIG, "cullscale")
+        assert int.from_bytes(data[si + CULLSCALE_OFF:si + CULLSCALE_OFF + 2], "little") == 0x0258, \
+            "cullscale imm mismatch"
+        data[si + CULLSCALE_OFF:si + CULLSCALE_OFF + 2] = CULLSCALE_NEW.to_bytes(2, "little")
+        print("CULL-SCALE @0x%X  cone distance-scaling off (full stock draw distance kept)" % (
+            si + CULLSCALE_OFF))
+
+        # (No FAR-CULL trim: the far "ring" is the black backdrop that hides the draw edge straight
+        # ahead. Trimming it exposes the edge as center popping -- so we leave it at the stock 0x100.
+        # The remaining distant *side* popping is inherent to KF2's forward-Z depth fog at wide FOV.)
 
 
 def make_bps(source, target):
@@ -679,13 +786,22 @@ def main(argv=None):
     ap.add_argument("--bps", metavar="patch.bps",
                     help="also write a shareable BPS patch (contains only our edits)")
     ap.add_argument("--fov", type=float, default=None, metavar="DEG",
-                    help="custom horizontal field of view in degrees (game default ~77; "
-                         "e.g. 90 for widescreen). Lower H/wider FOV; pairs with a 16:9 display.")
+                    help="[EXPERIMENTAL] custom horizontal field of view in degrees (game default "
+                         "~77; e.g. 90/100). Lower H/wider FOV (both axes). KNOWN ISSUE: at a wide "
+                         "FOV, distant geometry at the far left/right can't be fully fogged (KF2's "
+                         "fog is forward-Z based) and may pop. Recommended widescreen mode is the "
+                         "stock FOV + --cull on. See docs/RESEARCH.md sec.13.")
+    ap.add_argument("--cull", choices=("on", "off"), default=None,
+                    help="widescreen edge-culling fix (widen the PVS view cone so walls/objects "
+                         "stop popping at the 16:9 edges; also fixes the bottom corners). Default: "
+                         "on when --fov is set, else off. An explicit --cull on/off overrides that. "
+                         "Use --cull on (without --fov) for stock-FOV widescreen.")
     ap.add_argument("--no-crc-check", action="store_true",
                     help="skip the source size/CRC verification")
     args = ap.parse_args(argv)
     if args.fov is not None and not (40.0 <= args.fov <= 150.0):
         ap.error("--fov must be between 40 and 150 degrees")
+    cull = None if args.cull is None else (args.cull == "on")
 
     source = bytearray(open(args.input, "rb").read())
 
@@ -698,11 +814,12 @@ def main(argv=None):
             print("  (continuing; patches are signature-located. Use --no-crc-check to silence.)")
 
     data = bytearray(source)
-    apply_patches(data, args.mode, args.fov)
+    apply_patches(data, args.mode, args.fov, cull)
     open(args.output, "wb").write(data)
-    print("wrote %s (%d bytes), mode=%s%s" % (
+    print("wrote %s (%d bytes), mode=%s%s%s" % (
         args.output, len(data), args.mode,
-        "" if args.fov is None else (", fov=%g deg" % args.fov)))
+        "" if args.fov is None else (", fov=%g deg" % args.fov),
+        "" if args.cull is None else (", cull=%s" % args.cull)))
 
     if args.bps:
         bps = make_bps(bytes(source), bytes(data))

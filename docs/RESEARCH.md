@@ -641,3 +641,91 @@ herring**: it's a *different* drop than the visible gold (`FUN_80046294`). v24 a
 load-delay bug** (shifted the step register the instruction right after loading it → stale value).
 Lesson reinforced: on the R3000 a loaded register isn't available to the next instruction — fill the
 delay slot. v26 gates the *shared edge*, fixing gold + herb together. Confirmed in-game.
+
+## 13. Widescreen — custom FOV, depth fog, and the PVS edge culling
+
+This documents the FOV/widescreen work: how KF2 projects, where the FOV lives, the depth-cue fog,
+the dungeon's potentially-visible-set (PVS) culling, the fixes applied, and the **inherent limit**
+that keeps distant *side* geometry from fogging cleanly at a wide FOV. Patcher flags: `--fov DEG`
+(experimental) and `--cull on|off` (auto-on with `--fov`).
+
+### 13.1 Projection & FOV (the GTE H register)
+The scene-init `FUN_80035394` sets the GTE projection: `gte_SetGeomOffset(0xa0,0x78)` (OFX=160,
+OFY=120 → centre of a 320×240, 4:3 framebuffer) and `gte_ldH(200)`. Horizontal FOV =
+`2·atan(160/H)`, so **H=200 → ~77.3° (stock)**; lower H = wider FOV (H=160→90°, H=134→100°). H is
+loaded by the idiom `ori t0,zero,0xc8 / addu t4,t0,zero / ctc2 t4,H(26)` at **two** sites in
+`FUN_80035394`. `--fov` rewrites that 16-bit immediate at both (`H = round(160/tan(deg/2))`). H
+scales *both* axes, so a wider FOV also shows more vertically (it's true zoom, not anamorphic). The
+**16:9 aspect** itself is left to DuckStation's widescreen rendering (anamorphic X-scale); `--fov`
+is the zoom/feel knob that stacks with it.
+
+Ghidra didn't disassemble the PSX GTE ops (custom COP2) — they read as data. The `scan_cop2.java`
+helper raw-decodes them; the H/OFX/OFY writes are the `ctc2 cr26/24/25` sites.
+
+### 13.2 Depth-cue fog (and why it must track H)
+`FUN_80035358(near,far)` is KF2's SetFog: it stores `DAT_801aec7c/80` (fog near/far = 20000/24000
+world units) and calls `SetFogNear(a, 200)` @`0x80035380` — the **200 is the projection H** the fog
+math (DQA/DQB) assumes. The GTE depth-cue darkens each poly toward the near-black FarColor (5,5,5)
+by a factor `IR0 = DQB + DQA·(H_gte/sz)` where `H_gte` is the live GTE H register. If `--fov` changes
+H but the fog still assumes 200, the fog is miscalibrated (distant geometry under-fogged → pops). So
+`--fov` also rewrites that `0xc8`→new-H (`FOG-H` patch) to keep them consistent. (Fog is **off** when
+`--fov` is omitted, since H is unchanged.)
+
+### 13.3 The PVS culling (what actually pops, and the fix)
+KF2 is grid-based: an 80×80 cell map at `DAT_801d4464` (10 bytes/cell, stride 800), stamped by
+`FUN_80033c4c`. Each frame the render driver `FUN_800422b8` (last call in the main loop
+`FUN_80014bd4`) calls **`FUN_80034bf4`**, which builds a **25×25 potentially-visible-set grid at
+`DAT_801aec84`** by casting a view cone across the cells. BOTH renderers gate on it:
+- Walls: `FUN_8003bfd0` copies the PVS to scratchpad, then draws cell walls from `DAT_801d4464`
+  **only for flagged cells**.
+- Objects/enemies/items: `FUN_80040694(obj)` / `FUN_80040708` look the object's cell up in the PVS;
+  flag 0 = not drawn.
+
+The cone half-angle is the immediate of `addiu s5,v0,0x1b8` @`0x80034c80`: **`0x1b8` = 38.7° (KF2
+units, 0x1000=360°) = 77.3° total == the stock FOV exactly.** So at a wider FOV (or DuckStation's
+16:9), cells in the new edge band are never flagged → walls/objects pop in/out. **`CULL` fix:** widen
+that immediate to cover the displayed FOV — `half ≈ (fov/2)·(4/3 for 16:9) + 12° margin`, clamped
+`[0x1b8, 0x3a0]`. (Stock-FOV `--cull on` uses 77.3°.)
+
+Per-cell distance bands in `FUN_80034bf4` (cell radial dist² = `uVar9`):
+- `uVar9 < 5` **near band** — `0x1e`, *but still cone-tested* (`bgtz a0`/`bltz a1` @0x80034eb0/eb8).
+- `uVar9 < uVar21` **visible band** — cone-tested → `0x1a`. `uVar21 = drawdist² (DAT_801aeae9=0xd,
+  13 cells)`, scaled by `cos(halfangle/2)` when the cone half-angle ≥ 0x258 (wide).
+- `uVar9 < 0x100` **far band** — `8`, **NO cone test** = a full ring around the camera.
+- else culled.
+
+### 13.4 Two culling fixes (both gated on `--cull`)
+1. **Bottom corners** (`NEAR-BAND`): point-blank cells to the *sides* (screen bottom corners at a
+   wide FOV, ~90°) failed the near-band cone test. Widen the near radius `sltiu v0,v1,5`→`0x24`
+   @0x80034ea4 and NOP its two cone-check branches @0x80034eb0/eb8 → the immediate disc is always
+   drawn. Confirmed fixed in-game.
+2. The **far ring is deliberately left at stock (0x100).** Straight ahead those cells have huge
+   forward-Z → fully fogged black → they're the **backdrop that hides the draw-distance edge**.
+   Trimming the ring (tried `FARCULL` 0x100→0x90, v32) removed that backdrop and exposed the edge as
+   *center* popping. So: don't trim it.
+
+### 13.5 The inherent limit — distant SIDE popping (NOT fixable with radial knobs)
+KF2 **culls/draws by radial distance** (a circle) but **fogs by forward-Z** (depth ahead).
+- Dead ahead: radial ≈ forward-Z → the draw edge is fogged black → hidden.
+- Wide sides: a cell at the same radial distance has small forward-Z (it's beside you) → the fog
+  barely touches it → it's drawn unfogged → **pops** as you move/turn.
+Can't fog it (fog dense enough to catch it blacks out the forward view at ~3 cells) and can't shorten
+the *side* draw distance without shortening it *forward* too (one radial value → re-exposes centre).
+The only real fix is **angular culling** (draw the far backdrop only in a narrow forward cone, cull
+it at the wide sides) — a larger job, deferred. The popping is **milder at lower FOV** (stock 77°×16:9
+≈ 103° shows less extreme sides than 100°×16:9 ≈ 133°), which is why `--cull on` *without* `--fov` is
+the recommended widescreen mode and `--fov` is flagged **experimental**.
+
+### 13.6 Key addresses (widescreen)
+| Name | Address | Notes |
+| --- | --- | --- |
+| Projection init | `FUN_80035394` | `gte_SetGeomOffset(160,120)` + `gte_ldH(200)` (×2) |
+| FOV (H) load idiom | `0x800353f0`, `0x800354cc` | `ori t0,zero,0xc8` → ctc2 H; `--fov` rewrites the 0xc8 |
+| Fog setup | `FUN_80035358` | SetFog(20000,24000); `SetFogNear(a,200)` @`0x80035380` (fog H) |
+| PVS builder | `FUN_80034bf4` | cone half-angle `0x1b8` @`0x80034c80`; near band @`0x80034ea4`-eb8; far ring `0x100` @`0x80034eec` |
+| PVS grid | `DAT_801aec84` | 25×25 visible-cell flags; camera offsets `DAT_801aec6c/70` |
+| Draw distance | `DAT_801aeae9` | `0xd`=13 cells; `uVar21 = dist²·cos(halfangle/2)` |
+| Wall renderer | `FUN_8003bfd0` | draws cell walls for PVS-flagged cells |
+| Object visibility | `FUN_80040694` / `FUN_80040708` | PVS lookup; 0 = culled |
+| Dungeon cell grid | `DAT_801d4464` | 80×80, 10 bytes/cell, stride 800 |
+| Render driver / loop | `FUN_800422b8` / `FUN_80014bd4` | per-frame render / main game loop |

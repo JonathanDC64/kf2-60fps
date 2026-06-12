@@ -53,9 +53,19 @@ Options:
 
 ```
 --mode quarter|half   quarter = 60 fps + 1/4 speed (default); half = 30 fps + 1/2 speed
+--cull on|off         widescreen edge-culling fix: widen the dungeon's visible-cell cone so walls,
+                      objects and the bottom corners stop popping at the 16:9 edges. Use with
+                      DuckStation's widescreen rendering. Default: on when --fov is set, else off.
+--fov DEG             [EXPERIMENTAL] custom horizontal FOV in degrees (stock ~77; e.g. 90/100).
+                      Known issue: at a wide FOV, distant geometry at the far left/right can't be
+                      fully fogged (KF2's fog is forward-Z based) and may pop. For clean widescreen,
+                      prefer the stock FOV with --cull on.
 --bps patch.bps       also write a shareable BPS patch (contains only our edits, no game code)
 --no-crc-check        skip the source size/CRC verification
 ```
+
+For 16:9 widescreen, build with `--cull on` and enable DuckStation's widescreen rendering (16:9).
+See [docs/RESEARCH.md](docs/RESEARCH.md) §13 for the FOV/fog/culling reverse-engineering details.
 
 ### Sharing a patch
 
