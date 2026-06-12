@@ -19,6 +19,7 @@ the cap).
 | --- | --- |
 | Frame cap | 15 FPS → **60 FPS** (`quarter`) or 30 FPS (`half`) |
 | Player walk / turn | scaled ÷4 (÷2 in half mode) |
+| Vertical camera (look up/down) | pitch advance scaled ÷4 (÷2 in half mode) — turning/yaw already covered above |
 | Head-bob | disabled (cosmetic; ran too fast) |
 | Enemy movement | ÷4, with rounding so slow/diagonal enemies aren't starved |
 | Attack bar (weapon charge) | recharges ÷4 (correct attack cadence) |

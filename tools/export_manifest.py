@@ -68,6 +68,11 @@ def build():
     edit("turn", P.TURN_SIG, [
         {"off": P.TURN_OFF20, "w": 1, "old": 0x20, "new": per_mode(P.TURN_NEW20)},
         {"off": P.TURN_OFF28, "w": 1, "old": 0x28, "new": per_mode(P.TURN_NEW28)}])
+    # LOOK (vertical camera / pitch): both apply sites, addu v1,v0,zero -> sra v1,v0,N
+    edit("look_up", P.LOOK_UP_SIG, [{"off": P.LOOK_OFF, "w": 4, "old": P.LOOK_OLD,
+                                     "new": per_mode(P.LOOK_NEW)}])
+    edit("look_dn", P.LOOK_DN_SIG, [{"off": P.LOOK_OFF, "w": 4, "old": P.LOOK_OLD,
+                                     "new": per_mode(P.LOOK_NEW)}])
     edit("magdelay", P.MAGDELAY_SIG, [{"off": P.MAGDELAY_OFF, "w": 1, "old": 0x3c,
                                        "new": per_mode(P.MAGDELAY_NEW)}])
     edit("enemyanim", P.ENEMYANIM_SIG, [{"off": P.ENEMYANIM_OFF, "w": 4, "old": 0,

@@ -70,6 +70,19 @@ TURN_OFF28 = 0x28
 TURN_NEW20 = {"half": 0x10, "quarter": 0x08}
 TURN_NEW28 = {"half": 0x14, "quarter": 0x0a}
 
+# --- LOOK: vertical camera / pitch (FUN_8002f5c0). Pitch angle DAT_801b2610 advances by the pitch
+# velocity DAT_801b264e each frame. Unlike yaw (which rides the TURN step DAT_801b2668), pitch uses a
+# hardcoded velocity (ramp +-3, clamp +-0x20) the TURN patch never touched -> at 60fps the vertical
+# look is ~4x too fast. At each of the two apply sites the velocity is copied `addu v1,v0,zero` right
+# before `pitch += v1`; we change that copy to an arithmetic `sra v1,v0,N` (N=2 quarter, 1 half) so
+# the pitch advances 1/4 (1/2) per frame -- correct max look speed, the ramp/clamp feel preserved.
+# Two sites in the same function: looking up (blez-guarded @0x8002f92c) and down (bgez @0x8002f974).
+LOOK_UP_SIG = bytes.fromhex("4e264284" "00000000" "10004018" "21184000")  # lh v0,0x264e/nop/blez v0/addu v1,v0,zero
+LOOK_DN_SIG = bytes.fromhex("4e264284" "00000000" "0e004104" "21184000")  # lh v0,0x264e/nop/bgez v0/addu v1,v0,zero
+LOOK_OFF = 0x0c                    # the `addu v1,v0,zero` (00401821) word -> `sra v1,v0,N`
+LOOK_OLD = 0x00401821              # addu v1,v0,zero
+LOOK_NEW = {"quarter": 0x00021883, "half": 0x00021843}   # sra v1,v0,2 / sra v1,v0,1
+
 # --- ENEMY movement (code cave). All enemy movement funnels through FUN_8004dbc8,
 # which loads per-frame velocity (vx=s3, vz=s0) then does enemy.pos += vx/vz. No free
 # inline slot, so redirect `move s7,s3` (@0x8004dc38) to a cave that round-half-away
@@ -552,6 +565,15 @@ def apply_patches(data, mode, fov=None, cull=None):
     data[t + TURN_OFF20] = TURN_NEW20[mode]
     data[t + TURN_OFF28] = TURN_NEW28[mode]
     print("TURN       @0x%X,0x%X" % (t + TURN_OFF20, t + TURN_OFF28))
+
+    # LOOK (vertical / pitch): scale the per-frame pitch advance at both apply sites (up + down).
+    for nm, sig in (("look_up", LOOK_UP_SIG), ("look_dn", LOOK_DN_SIG)):
+        li = find_once(data, sig, nm)
+        assert int.from_bytes(data[li + LOOK_OFF:li + LOOK_OFF + 4], "little") == LOOK_OLD, \
+            "%s byte mismatch" % nm
+        data[li + LOOK_OFF:li + LOOK_OFF + 4] = LOOK_NEW[mode].to_bytes(4, "little")
+        print("LOOK       @0x%X  %s  addu v1,v0,zero -> sra v1,v0,%d (vertical camera /%d)" % (
+            li + LOOK_OFF, nm, 2 if mode == "quarter" else 1, 4 if mode == "quarter" else 2))
 
     # GAME.EXE byte-0 in the raw .bin (anchor for cave offset math).
     je = find_once(data, ENEMY_JSIG, "enemy")

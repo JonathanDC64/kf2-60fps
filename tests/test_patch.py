@@ -46,6 +46,7 @@ SIGS = {
     "item-moveout": (0x1b00, P.ITEM_IMM_EDITS[2][1]),
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "dropedge": (0x1c00, P.DROPEDGE_SIG),
+    "look_up": (0x2100, P.LOOK_UP_SIG), "look_dn": (0x2200, P.LOOK_DN_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -97,6 +98,10 @@ def test_quarter_byte_edits():
         P.MENU_VSYNC_NEW.to_bytes(4, "little")       # repeat loop -> deterministic vblank wait
     assert d[MENUCAP_OFF_FIX + P.MENUCAP_OFF:MENUCAP_OFF_FIX + P.MENUCAP_OFF + 4] == \
         P.MENUCAP_NEW.to_bytes(4, "little")          # menu vsync -> vblank cap (this copy only)
+    # LOOK (vertical camera): both apply sites addu v1,v0,zero -> sra v1,v0,2 (pitch advance ÷4)
+    for look_off in (0x2100, 0x2200):
+        assert int.from_bytes(d[look_off + P.LOOK_OFF:look_off + P.LOOK_OFF + 4], "little") == \
+            P.LOOK_NEW["quarter"]
 
 
 def test_half_mode():
@@ -116,6 +121,9 @@ def test_half_mode():
     assert d[0x1600 + P.MSG_APPEAR_OFF] == 0x0a                    # notification appear step (half)
     assert d[0x1700 + P.MSG_DISAPPEAR_OFF] == 0xf6                 # notification disappear (half)
     assert d[0x1800 + P.ITEMSPIN_OFF] == 0x20                      # item pickup spin step (half)
+    for look_off in (0x2100, 0x2200):                              # LOOK pitch advance ÷2 (sra v1,v0,1)
+        assert int.from_bytes(d[look_off + P.LOOK_OFF:look_off + P.LOOK_OFF + 4], "little") == \
+            P.LOOK_NEW["half"]
 
 
 def test_cave_redirects_and_bodies():
