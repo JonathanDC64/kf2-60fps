@@ -1,7 +1,10 @@
 {
  "meta": {
+  "serial": "SLUS-00255",
   "src_size": 571766496,
   "src_crc32": "F8A4C585",
+  "src_md5": "bf503b25c229ae048127a16679396d17",
+  "src_sha1": "131d2574f6ea101823193845f001bb58cdd3ed5e",
   "text_vaddr": 2147553280,
   "sector_data": 2048,
   "sector_overhead": 304

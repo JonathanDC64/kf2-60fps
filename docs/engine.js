@@ -180,8 +180,61 @@
     return Uint8Array.from(out);
   }
 
+  // ---- streaming MD5 (matches Python hashlib.md5) -- for chunked, non-blocking hashing ----
+  var MD5_S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+               5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+               4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+               6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+  var MD5_K = (function () { var k = new Int32Array(64); for (var i = 0; i < 64; i++) k[i] = (Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296)) | 0; return k; })();
+  function MD5() { this.h = new Int32Array([0x67452301, 0xefcdab89 | 0, 0x98badcfe | 0, 0x10325476]); this.block = new Uint8Array(64); this.blockLen = 0; this.total = 0; this.M = new Int32Array(16); }
+  MD5.prototype._proc = function (buf, off) {
+    var M = this.M, j;
+    for (j = 0; j < 16; j++) M[j] = (buf[off + j * 4]) | (buf[off + j * 4 + 1] << 8) | (buf[off + j * 4 + 2] << 16) | (buf[off + j * 4 + 3] << 24);
+    var a = this.h[0], b = this.h[1], c = this.h[2], d = this.h[3], f, g, i, s;
+    for (i = 0; i < 64; i++) {
+      if (i < 16) { f = (b & c) | (~b & d); g = i; }
+      else if (i < 32) { f = (d & b) | (~d & c); g = (5 * i + 1) & 15; }
+      else if (i < 48) { f = b ^ c ^ d; g = (3 * i + 5) & 15; }
+      else { f = c ^ (b | ~d); g = (7 * i) & 15; }
+      f = (f + a + MD5_K[i] + M[g]) | 0; a = d; d = c; c = b; s = MD5_S[i];
+      b = (b + ((f << s) | (f >>> (32 - s)))) | 0;
+    }
+    this.h[0] = (this.h[0] + a) | 0; this.h[1] = (this.h[1] + b) | 0; this.h[2] = (this.h[2] + c) | 0; this.h[3] = (this.h[3] + d) | 0;
+  };
+  MD5.prototype.update = function (bytes) {
+    this.total += bytes.length; var i = 0, n = bytes.length;
+    if (this.blockLen) { while (i < n && this.blockLen < 64) this.block[this.blockLen++] = bytes[i++]; if (this.blockLen === 64) { this._proc(this.block, 0); this.blockLen = 0; } }
+    while (i + 64 <= n) { this._proc(bytes, i); i += 64; }
+    while (i < n) this.block[this.blockLen++] = bytes[i++];
+    return this;
+  };
+  MD5.prototype.hex = function () {
+    var total = this.total, pad = [0x80], z;
+    var rem = (this.blockLen + 1) % 64, zeros = (rem <= 56) ? (56 - rem) : (120 - rem);
+    for (z = 0; z < zeros; z++) pad.push(0);
+    var bl = total * 8, lo = bl % 4294967296, hi = Math.floor(bl / 4294967296);
+    pad.push(lo & 0xff, (lo >>> 8) & 0xff, (lo >>> 16) & 0xff, (lo >>> 24) & 0xff, hi & 0xff, (hi >>> 8) & 0xff, (hi >>> 16) & 0xff, (hi >>> 24) & 0xff);
+    this.update(Uint8Array.from(pad));
+    var out = "", v, b2, byte;
+    for (var i = 0; i < 4; i++) { v = this.h[i] >>> 0; for (b2 = 0; b2 < 4; b2++) { byte = (v >>> (b2 * 8)) & 0xff; out += (byte < 16 ? "0" : "") + byte.toString(16); } }
+    return out;
+  };
+  function md5Hex(bytes) { return new MD5().update(bytes).hex(); }
+  function crc32Hex(buf) { return ("0000000" + crc32(buf).toString(16)).slice(-8).toUpperCase(); }
+
+  // Incremental crc32 + md5 for chunked (non-blocking) hashing of a large buffer.
+  function newHasher() {
+    var c = 0xFFFFFFFF, md = new MD5();
+    return {
+      update: function (b) { md.update(b); for (var i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); },
+      crc32Hex: function () { return ("0000000" + ((c ^ 0xFFFFFFFF) >>> 0).toString(16)).slice(-8).toUpperCase(); },
+      md5Hex: function () { return md.hex(); }
+    };
+  }
+
   var api = { applyPatches: applyPatches, fovToH: fovToH, fovToCullHalf: fovToCullHalf,
-              crc32: crc32, makeBps: makeBps, _binOff: binOff, _fileOff: fileOff };
+              crc32: crc32, crc32Hex: crc32Hex, md5Hex: md5Hex, makeBps: makeBps,
+              newHasher: newHasher, _binOff: binOff, _fileOff: fileOff };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.KF2Patcher = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

@@ -6,11 +6,13 @@ This is the guard that keeps the two patchers from drifting:
   * test_engine_parity     -- engine.js (Node) == apply_patches() for every option combo.
 The Node tests skip automatically if `node` isn't installed.
 """
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import zlib
 
 import pytest
 
@@ -78,3 +80,23 @@ def test_bps_parity(tmp_path):
     subprocess.run([NODE, DRIVER, str(fixture), MANIFEST, "quarter", "null", "null",
                     str(out), str(bps)], check=True, cwd=HERE)
     assert bps.read_bytes() == py_bps, "engine.js makeBps differs from make_bps"
+
+
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_hash_parity(tmp_path):
+    """engine.js md5Hex/crc32Hex must match hashlib.md5 / zlib.crc32 (used to verify the dump)."""
+    data = bytes(make_fixture())
+    fx = tmp_path / "f.bin"
+    fx.write_bytes(data)
+    engine = os.path.join(ROOT, "docs", "engine.js").replace("\\", "/")
+    code = ("const e=require(%r);const fs=require('fs');"
+            "const b=new Uint8Array(fs.readFileSync(process.argv[1]));"
+            "process.stdout.write(e.md5Hex(b)+' '+e.crc32Hex(b));") % engine
+    r = subprocess.run([NODE, "-e", code, str(fx)], capture_output=True, text=True, check=True)
+    md5, crc = r.stdout.split()
+    assert md5 == hashlib.md5(data).hexdigest()
+    assert crc == "%08X" % (zlib.crc32(data) & 0xffffffff)
+    # the manifest's documented hashes are valid hex of the right length
+    meta = json.load(open(MANIFEST))["meta"]
+    assert len(meta["src_md5"]) == 32 and len(meta["src_sha1"]) == 40
+    assert meta["serial"] == "SLUS-00255"

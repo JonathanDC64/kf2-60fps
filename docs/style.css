@@ -1,5 +1,5 @@
 /* King's Field II 60 FPS patcher -- original CSS theming only (no game assets). */
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=EB+Garamond:ital@0;1&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
 :root {
   --bg: #0a0807;
@@ -8,8 +8,8 @@
   --edge: #3a2f1d;
   --gold: #c9a227;
   --gold-dim: #8a7220;
-  --text: #d8cdb4;
-  --text-dim: #9a8e74;
+  --text: #e4dcc6;
+  --text-dim: #b3a888;
   --blood: #7a1f15;
   --ok: #6f8f3a;
   --warn: #c98a27;
@@ -23,9 +23,9 @@ body {
     repeating-linear-gradient(0deg, #0a0807, #0a0807 2px, #0c0a08 2px, #0c0a08 4px),
     var(--bg);
   color: var(--text);
-  font-family: 'EB Garamond', Georgia, serif;
+  font-family: 'Spectral', Georgia, serif;
   font-size: 18px;
-  line-height: 1.5;
+  line-height: 1.55;
   min-height: 100vh;
   padding: 2rem 1rem 4rem;
 }
@@ -64,7 +64,7 @@ header .rule {
 
 label.opt { display: block; margin: 0.55rem 0; cursor: pointer; }
 label.opt .name { color: var(--text); }
-label.opt .hint { color: var(--text-dim); font-size: 0.85em; font-style: italic; display: block; margin-left: 1.7rem; }
+label.opt .hint { color: var(--text-dim); font-size: 0.9em; display: block; margin-left: 1.7rem; margin-top: 0.1rem; }
 input[type=radio], input[type=checkbox] { accent-color: var(--gold); transform: scale(1.2); margin-right: 0.6rem; vertical-align: middle; }
 .tag-exp { color: var(--warn); font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.1em; border: 1px solid var(--warn); border-radius: 3px; padding: 0 0.35em; margin-left: 0.4rem; vertical-align: middle; }
 
@@ -74,6 +74,7 @@ input[type=radio], input[type=checkbox] { accent-color: var(--gold); transform: 
 .fovrow .val { font-family: 'Cinzel', serif; color: var(--gold); min-width: 3.2em; text-align: right; }
 
 .file-drop {
+  display: block;
   border: 2px dashed var(--gold-dim); border-radius: 6px; text-align: center;
   padding: 1.6rem 1rem; cursor: pointer; transition: background 0.15s, border-color 0.15s;
   background: rgba(201,162,39,0.03);
@@ -108,9 +109,21 @@ button.forge:not(:disabled):hover { filter: brightness(1.08); }
   background: rgba(201,162,39,0.05);
 }
 .downloads a:hover { background: rgba(201,162,39,0.14); }
-.downloads a .sz { color: var(--text-dim); font-size: 0.8em; font-family: 'EB Garamond', serif; }
+.downloads a .sz { color: var(--text-dim); font-size: 0.8em; font-family: 'Spectral', serif; }
 
 footer { text-align: center; color: var(--text-dim); font-size: 0.82em; margin-top: 2rem; font-style: italic; }
 footer a { color: var(--gold-dim); }
-.note { color: var(--text-dim); font-size: 0.85em; font-style: italic; }
-code { font-family: ui-monospace, monospace; color: var(--gold); background: #000; padding: 0 0.3em; border-radius: 3px; font-size: 0.85em; }
+.note { color: var(--text); font-size: 0.95em; }
+code, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+code { color: var(--gold); background: #000; padding: 0 0.3em; border-radius: 3px; font-size: 0.85em; }
+
+table.hashes { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+table.hashes th { text-align: left; color: var(--text-dim); font-weight: 500; font-family: 'Cinzel', serif; font-size: 0.8em; letter-spacing: 0.08em; text-transform: uppercase; width: 4.5rem; padding: 0.25rem 0.6rem 0.25rem 0; vertical-align: middle; }
+table.hashes td.mono { color: var(--text); font-size: 0.82em; word-break: break-all; padding: 0.25rem 0; }
+table.hashes td.chk { width: 1.6rem; text-align: center; font-weight: 700; }
+table.hashes td.chk.ok::after { content: "\2714"; color: var(--ok); }
+table.hashes td.chk.bad::after { content: "\2718"; color: #e08a7a; }
+table.hashes td.chk.run::after { content: "\2026"; color: var(--text-dim); }
+#verifyStatus.ok { color: var(--ok); font-style: normal; }
+#verifyStatus.err { color: #e08a7a; font-style: normal; }
+#verifyStatus.run { color: var(--gold); }

@@ -36,8 +36,11 @@ def per_mode(d):
 def build():
     m = {
         "meta": {
+            "serial": P.SRC_SERIAL,             # SLUS-00255 (King's Field II, USA)
             "src_size": P.SRC_SIZE,
             "src_crc32": "%08X" % P.SRC_CRC32,
+            "src_md5": P.SRC_MD5,
+            "src_sha1": P.SRC_SHA1,
             "text_vaddr": P.TEXT_VADDR,         # for vaddr -> file-offset
             "sector_data": 2048,                # MODE2/2352 user bytes per sector
             "sector_overhead": 304,             # ... and the non-data bytes

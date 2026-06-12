@@ -29,13 +29,17 @@ Usage:
 See docs/RESEARCH.md for the full reverse-engineering write-up.
 """
 import argparse
+import hashlib
 import math
 import sys
 import zlib
 
-# Reference fingerprint of the known-good source (Redump "King's Field II (USA)").
+# Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
+SRC_SERIAL = "SLUS-00255"
 SRC_SIZE = 571766496
 SRC_CRC32 = 0xF8A4C585
+SRC_MD5 = "bf503b25c229ae048127a16679396d17"
+SRC_SHA1 = "131d2574f6ea101823193845f001bb58cdd3ed5e"
 
 # --- BOB: head-bob disable (FUN_8002ed60): `sh v0,0x2650` -> `sh zero,0x2650`. ---
 BOB_SIG = bytes.fromhex(
@@ -806,12 +810,20 @@ def main(argv=None):
     source = bytearray(open(args.input, "rb").read())
 
     if not args.no_crc_check:
-        crc = zlib.crc32(source) & 0xffffffff
-        if len(source) != SRC_SIZE or crc != SRC_CRC32:
-            print("WARNING: input does not match the known King's Field II (USA) dump")
-            print("  expected size=%d crc32=0x%08X" % (SRC_SIZE, SRC_CRC32))
-            print("  got      size=%d crc32=0x%08X" % (len(source), crc))
+        crc = "%08X" % (zlib.crc32(source) & 0xffffffff)
+        md5 = hashlib.md5(source).hexdigest()
+        sha1 = hashlib.sha1(source).hexdigest()
+        mism = (len(source) != SRC_SIZE or crc != "%08X" % SRC_CRC32
+                or md5 != SRC_MD5 or sha1 != SRC_SHA1)
+        if mism:
+            print("WARNING: input does not match the known King's Field II (USA) dump (%s)" % SRC_SERIAL)
+            print("  expected size=%d crc32=%s" % (SRC_SIZE, "%08X" % SRC_CRC32))
+            print("           md5=%s sha1=%s" % (SRC_MD5, SRC_SHA1))
+            print("  got      size=%d crc32=%s" % (len(source), crc))
+            print("           md5=%s sha1=%s" % (md5, sha1))
             print("  (continuing; patches are signature-located. Use --no-crc-check to silence.)")
+        else:
+            print("VERIFIED   %s  size/crc32/md5/sha1 all match" % SRC_SERIAL)
 
     data = bytearray(source)
     apply_patches(data, args.mode, args.fov, cull)
