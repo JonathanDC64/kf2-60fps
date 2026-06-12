@@ -37,7 +37,20 @@ the cap).
 Optional/cosmetic only: a non-cosmetic head-bob (currently disabled). See
 [docs/RESEARCH.md](docs/RESEARCH.md) for the full reverse-engineering write-up.
 
-## Quick start
+## Web patcher (no install)
+
+A browser version lives in [`docs/`](docs/) and runs **entirely client-side** — your disc image
+never leaves your machine. Enable GitHub Pages (Settings → Pages → *Deploy from a branch* →
+`main` / `/docs`) to host it; then load your `.bin`, pick the options (60/30 fps, widescreen
+culling, experimental FOV), and download the patched `.bin` + `.cue` (and optionally a `.bps`).
+
+It shares a **single source of truth** with the Python patcher: `tools/export_manifest.py` exports
+the patch data to [`docs/patches.json`](docs/patches.json), and `docs/engine.js` applies it. A
+parity test (`tests/test_web_parity.py`) asserts the web engine produces **byte-identical** output
+to the Python patcher, so the two never drift. **After changing any patch, run
+`python tools/export_manifest.py`** (the test will remind you if you forget).
+
+## Quick start (CLI)
 
 Requires Python 3.8+ and your own `King's Field II (USA).bin` (raw `MODE2/2352` dump,
 571,766,496 bytes, CRC32 `F8A4C585`).

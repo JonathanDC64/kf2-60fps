@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>King's Field II — 60 FPS Patcher</title>
+<meta name="description" content="Browser patcher for King's Field II (USA): native-speed 60 FPS, widescreen culling fix, and an optional custom FOV. Runs entirely in your browser — your disc image never leaves your machine.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>King's Field II</h1>
+    <div class="sub">60 FPS Speed-Compensation Patcher</div>
+    <div class="rule"></div>
+  </header>
+
+  <div class="panel">
+    <p class="note">Patches your own <strong>King's Field II (USA)</strong> disc image (raw
+    <code>MODE2/2352</code> <code>.bin</code>, 571,766,496 bytes) to run at native speed at 60 FPS.
+    Everything happens <strong>in your browser</strong> — the file is never uploaded.</p>
+
+    <label class="file-drop" id="drop" for="fileInput">
+      <div class="big" id="dropBig">Choose your King's Field II (USA) .bin</div>
+      <div class="small" id="dropSmall">or drag &amp; drop it here</div>
+      <input type="file" id="fileInput" accept=".bin">
+    </label>
+  </div>
+
+  <div class="panel">
+    <h2>Forge your patch</h2>
+
+    <div>
+      <label class="opt"><input type="radio" name="mode" value="quarter" checked>
+        <span class="name">60 FPS</span>
+        <span class="hint">native speed at 60 fps (recommended). Needs CPU overclock in your emulator.</span></label>
+      <label class="opt"><input type="radio" name="mode" value="half">
+        <span class="name">30 FPS</span>
+        <span class="hint">native speed at 30 fps (lighter on the emulator).</span></label>
+    </div>
+
+    <div style="margin-top:0.6rem;border-top:1px solid var(--edge);padding-top:0.6rem">
+      <label class="opt"><input type="checkbox" id="cull">
+        <span class="name">Widescreen edge-culling fix</span>
+        <span class="hint">stops walls / objects / corners popping at the 16:9 edges. Use with your
+        emulator's widescreen (16:9) rendering. (Auto-enabled if you set a custom FOV.)</span></label>
+
+      <label class="opt"><input type="checkbox" id="fovEnable">
+        <span class="name">Custom field of view <span class="tag-exp">Experimental</span></span>
+        <span class="hint">widen the FOV (stock ≈ 77°). Known issue: at a wide FOV, distant geometry
+        at the far left/right can't be fully fogged and may pop. Stock FOV + culling is cleanest.</span></label>
+      <div class="fovrow" id="fovRow">
+        <input type="range" id="fov" min="60" max="120" step="1" value="90">
+        <span class="val" id="fovVal">90°</span>
+      </div>
+    </div>
+
+    <div style="margin-top:0.6rem;border-top:1px solid var(--edge);padding-top:0.6rem">
+      <label class="opt"><input type="checkbox" id="wantBps">
+        <span class="name">Also make a shareable <code>.bps</code> patch</span>
+        <span class="hint">tiny file (just the edits, no game data) others can apply to their own dump.
+        Uses more memory while generating.</span></label>
+    </div>
+
+    <button class="forge" id="forge" disabled>Load a .bin first</button>
+    <div id="status"></div>
+    <div class="downloads" id="downloads"></div>
+  </div>
+
+  <footer>
+    Runs 100% client-side. No disc data is uploaded or stored. You must supply your own legally-obtained dump.<br>
+    Built from the <a href="https://github.com/" id="repoLink">open-source patcher</a>; see the project's
+    <code>docs/RESEARCH.md</code> for the reverse-engineering write-up.
+  </footer>
+</div>
+
+<script src="engine.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

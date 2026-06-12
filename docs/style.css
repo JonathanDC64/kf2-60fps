@@ -1,0 +1,116 @@
+/* King's Field II 60 FPS patcher -- original CSS theming only (no game assets). */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=EB+Garamond:ital@0;1&display=swap');
+
+:root {
+  --bg: #0a0807;
+  --stone: #16120d;
+  --stone-2: #1f1a13;
+  --edge: #3a2f1d;
+  --gold: #c9a227;
+  --gold-dim: #8a7220;
+  --text: #d8cdb4;
+  --text-dim: #9a8e74;
+  --blood: #7a1f15;
+  --ok: #6f8f3a;
+  --warn: #c98a27;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #241c12 0%, transparent 60%),
+    repeating-linear-gradient(0deg, #0a0807, #0a0807 2px, #0c0a08 2px, #0c0a08 4px),
+    var(--bg);
+  color: var(--text);
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 18px;
+  line-height: 1.5;
+  min-height: 100vh;
+  padding: 2rem 1rem 4rem;
+}
+
+.wrap { max-width: 760px; margin: 0 auto; }
+
+header { text-align: center; margin-bottom: 1.5rem; }
+header h1 {
+  font-family: 'Cinzel', serif;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+  text-shadow: 0 2px 0 #000, 0 0 18px rgba(201,162,39,0.25);
+  font-size: clamp(1.6rem, 4.5vw, 2.6rem);
+  margin: 0;
+}
+header .sub { color: var(--text-dim); font-style: italic; margin-top: 0.3rem; }
+header .rule {
+  height: 2px; width: 60%; margin: 1rem auto 0;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--stone-2), var(--stone));
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #000 inset, 0 8px 24px rgba(0,0,0,0.5);
+  padding: 1.25rem 1.4rem;
+  margin: 1rem 0;
+}
+.panel h2 {
+  font-family: 'Cinzel', serif; font-size: 1rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--gold); margin: 0 0 0.8rem;
+  border-bottom: 1px solid var(--edge); padding-bottom: 0.4rem;
+}
+
+label.opt { display: block; margin: 0.55rem 0; cursor: pointer; }
+label.opt .name { color: var(--text); }
+label.opt .hint { color: var(--text-dim); font-size: 0.85em; font-style: italic; display: block; margin-left: 1.7rem; }
+input[type=radio], input[type=checkbox] { accent-color: var(--gold); transform: scale(1.2); margin-right: 0.6rem; vertical-align: middle; }
+.tag-exp { color: var(--warn); font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.1em; border: 1px solid var(--warn); border-radius: 3px; padding: 0 0.35em; margin-left: 0.4rem; vertical-align: middle; }
+
+.fovrow { display: flex; align-items: center; gap: 0.8rem; margin: 0.4rem 0 0 1.7rem; opacity: 0.45; pointer-events: none; transition: opacity 0.2s; }
+.fovrow.on { opacity: 1; pointer-events: auto; }
+.fovrow input[type=range] { flex: 1; accent-color: var(--gold); }
+.fovrow .val { font-family: 'Cinzel', serif; color: var(--gold); min-width: 3.2em; text-align: right; }
+
+.file-drop {
+  border: 2px dashed var(--gold-dim); border-radius: 6px; text-align: center;
+  padding: 1.6rem 1rem; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+  background: rgba(201,162,39,0.03);
+}
+.file-drop:hover, .file-drop.drag { background: rgba(201,162,39,0.09); border-color: var(--gold); }
+.file-drop .big { font-family: 'Cinzel', serif; color: var(--gold); font-size: 1.05rem; }
+.file-drop .small { color: var(--text-dim); font-size: 0.85em; }
+.file-drop.loaded { border-style: solid; border-color: var(--ok); }
+#fileInput { display: none; }
+
+button.forge {
+  display: block; width: 100%; margin-top: 0.4rem;
+  font-family: 'Cinzel', serif; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  font-size: 1.05rem; color: #1a1407;
+  background: linear-gradient(180deg, #e3c24a, var(--gold) 45%, var(--gold-dim));
+  border: 1px solid #f0d97a; border-radius: 5px; padding: 0.8rem; cursor: pointer;
+  box-shadow: 0 2px 0 #000, 0 0 16px rgba(201,162,39,0.25);
+}
+button.forge:disabled { background: linear-gradient(180deg, #4a443a, #322d25); color: #6a6253; border-color: #4a443a; cursor: not-allowed; box-shadow: none; }
+button.forge:not(:disabled):hover { filter: brightness(1.08); }
+
+#status { margin-top: 0.9rem; min-height: 1.4em; font-style: italic; color: var(--text-dim); }
+#status.err { color: #e08a7a; font-style: normal; }
+#status.ok { color: var(--ok); }
+
+.downloads { display: none; margin-top: 1rem; }
+.downloads.show { display: block; }
+.downloads a {
+  display: inline-block; margin: 0.3rem 0.5rem 0.3rem 0; padding: 0.5rem 1rem;
+  font-family: 'Cinzel', serif; letter-spacing: 0.06em; color: var(--gold);
+  border: 1px solid var(--gold-dim); border-radius: 4px; text-decoration: none;
+  background: rgba(201,162,39,0.05);
+}
+.downloads a:hover { background: rgba(201,162,39,0.14); }
+.downloads a .sz { color: var(--text-dim); font-size: 0.8em; font-family: 'EB Garamond', serif; }
+
+footer { text-align: center; color: var(--text-dim); font-size: 0.82em; margin-top: 2rem; font-style: italic; }
+footer a { color: var(--gold-dim); }
+.note { color: var(--text-dim); font-size: 0.85em; font-style: italic; }
+code { font-family: ui-monospace, monospace; color: var(--gold); background: #000; padding: 0 0.3em; border-radius: 3px; font-size: 0.85em; }
