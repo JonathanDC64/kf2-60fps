@@ -56,13 +56,17 @@
       <label class="opt"><input type="checkbox" id="cull">
         <span class="name">Widescreen edge-culling fix <span class="tag-exp">Experimental</span></span>
         <span class="hint">stops walls / objects / corners popping at the 16:9 edges. Use with your
-        emulator's widescreen (16:9) rendering. (Auto-enabled if you set a custom FOV.) KF2's fixed
-        visibility grid trims a widened cone, so the center draw distance is ~6% shorter than stock.</span></label>
+        emulator's widescreen (16:9) rendering. (Auto-enabled if you set a custom FOV.)
+        <span class="known">Known limits (KF2's fixed visibility grid): center draw distance is
+        ~6% shorter than stock, and a few distant billboard trees right at the draw edge can wobble
+        as you look up / down.</span></span></label>
 
       <label class="opt"><input type="checkbox" id="fovEnable">
         <span class="name">Custom field of view <span class="tag-exp">Experimental</span></span>
-        <span class="hint">widen the FOV (stock ≈ 77°). Known issue: at a wide FOV, distant geometry
-        at the far left/right can't be fully fogged and may pop. Stock FOV + culling is cleanest.</span></label>
+        <span class="hint">widen the FOV (stock ≈ 77°). <span class="known">Known issue: at a wide FOV,
+        distant geometry at the far left / right can't be fully fogged (KF2 fogs by forward depth) and
+        may pop; the widescreen-cull limits above also apply.</span> Stock FOV + the cull fix is the
+        cleanest widescreen.</span></label>
       <div class="fovrow" id="fovRow">
         <input type="range" id="fov" min="60" max="120" step="1" value="77">
         <span class="val" id="fovVal">77°</span>

@@ -737,6 +737,31 @@ for 16:9), or base **at/above** `0x258` (permanently in the cos branch — smoot
 `DAT_801aeae9` (the draw-distance value squared into `uVar21`) is **loaded per-scene from map data**
 (`ghidra_mainloop.txt:3749`, default `0xd`), so it can't be statically bumped to win the ~6% back.
 
+#### 13.4.2 Billboard/sprite "tree" edge wobble — inherent (the v38 pin attempt, reverted)
+Map objects (billboard trees, items, decorations) are **culled by the same PVS grid**: the object
+render loop `FUN_80040ae4` (~line 4488) reads each object's cell flag via `FUN_80040694` /
+`FUN_80040708` and draws it only if `(cellflag & objectmask) != 0`. So an object inherits whatever
+visibility band its grid cell is in — there is no separate per-object distance cull for the common
+case. Consequence on v37: the visible-band edge radius `uVar21 = drawdist² · cos(iVar22/2)` is now
+always cos-scaled, and `iVar22 = base + pitch_term` **breathes with camera pitch/bob**, so the edge
+shifts ~0.2 cell as you look around. Contiguous walls don't reveal it; a lone tree sitting *exactly*
+on that edge flips visible↔culled with it → a few trees wobble.
+
+**v38 attempt (reverted):** pin the `cos()` argument to a constant (the level-view angle) so the
+radius stops moving with pitch — replace the `rcos` arg `sra a0,s5,1` @cull-fn `+0x184` with
+`ori a0,zero,(half>>1)`. **It made things worse** (more tree flicker *and* the skybox/geometry
+flicker returned). Lesson: **the cos-scaling is load-bearing.** Its job is to shrink the radius as
+the cone widens with pitch so the cone's *sides* stay inside the 25×25 grid — and you pitch slightly
+up/down constantly during normal play, not just at extremes. Pinning the radius removes that
+protection during ordinary movement → the sides overrun the grid again → the worse flicker. So the
+pitch-driven shrink is exactly what makes v37 stable; the residual edge wobble is its unavoidable
+flip-side.
+
+**Conclusion: v37 is the practical ceiling for `--cull`.** A real fix would need a code cave giving
+billboard objects their *own* fixed far-distance cutoff (decoupled from the per-cell grid) instead of
+inheriting the cell flag — a larger, riskier job for a small cosmetic gain, deferred. The edge wobble
+is covered by the **experimental** label.
+
 ### 13.5 The inherent limit — distant SIDE popping (NOT fixable with radial knobs)
 KF2 **culls/draws by radial distance** (a circle) but **fogs by forward-Z** (depth ahead).
 - Dead ahead: radial ≈ forward-Z → the draw edge is fogged black → hidden.

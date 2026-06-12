@@ -65,6 +65,7 @@ header .rule {
 label.opt { display: block; margin: 0.55rem 0; cursor: pointer; }
 label.opt .name { color: var(--text); }
 label.opt .hint { color: var(--text-dim); font-size: 0.9em; display: block; margin-left: 1.7rem; margin-top: 0.1rem; }
+label.opt .hint .known { color: var(--warn); }
 input[type=radio], input[type=checkbox] { accent-color: var(--gold); transform: scale(1.2); margin-right: 0.6rem; vertical-align: middle; }
 .tag-exp { color: var(--warn); font-size: 0.72em; font-family: 'Cinzel', serif; letter-spacing: 0.1em; border: 1px solid var(--warn); border-radius: 3px; padding: 0 0.35em; margin-left: 0.4rem; vertical-align: middle; }
 

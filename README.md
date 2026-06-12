@@ -69,8 +69,10 @@ Options:
 --cull on|off         [EXPERIMENTAL] widescreen edge-culling fix: widen the dungeon's visible-cell
                       cone so walls, objects and the bottom corners stop popping at the 16:9 edges.
                       Use with DuckStation's widescreen rendering. Default: on when --fov is set,
-                      else off. KF2's fixed 25×25 visibility grid cos-scales a widened cone, so the
-                      center draw distance is ~6% shorter than stock (the price of a stable wide cone).
+                      else off. Known limits of KF2's fixed 25×25 visibility grid: the widened cone is
+                      cos-scaled so the center draw distance is ~6% shorter than stock, and a few
+                      distant billboard trees at the draw edge can wobble as you pitch the camera.
+                      See docs/RESEARCH.md §13.4 for the full analysis.
 --fov DEG             [EXPERIMENTAL] custom horizontal FOV in degrees (stock ~77; e.g. 90/100).
                       Known issue: at a wide FOV, distant geometry at the far left/right can't be
                       fully fogged (KF2's fog is forward-Z based) and may pop. For clean widescreen,
