@@ -63,7 +63,6 @@ def make_fixture():
     buf[0x1e00:0x1e00 + len(P.CULL_SIG)] = P.CULL_SIG   # PVS cone half-angle site
     buf[0x1f00:0x1f00 + len(P.FOGH_SIG)] = P.FOGH_SIG    # fog calibration H site
     buf[0x2000:0x2000 + len(P.NEARBAND_SIG)] = P.NEARBAND_SIG   # near-band (threshold + cone check)
-    buf[0x2100:0x2100 + len(P.CULLSCALE_SIG)] = P.CULLSCALE_SIG  # cone draw-distance scaling site
     return buf
 
 
@@ -173,16 +172,15 @@ def test_fov_optional():
     assert d[0x2000 + P.NEARBAND_THRESH_OFF] == P.NEARBAND_THRESH_NEW
     assert d[0x2000 + P.NEARBAND_NOP1_OFF:0x2000 + P.NEARBAND_NOP1_OFF + 4] == bytes(4)
     assert d[0x2000 + P.NEARBAND_NOP2_OFF:0x2000 + P.NEARBAND_NOP2_OFF + 4] == bytes(4)
-    # cone draw-distance scaling disabled (threshold 0x258 -> always-true)
-    assert int.from_bytes(d[0x2100 + P.CULLSCALE_OFF:0x2100 + P.CULLSCALE_OFF + 2], "little") == \
-        P.CULLSCALE_NEW
+    # the cull cone stays AT/ABOVE the 0x258 limiter so it's always cos-scaled (no pitch-cross flicker)
+    assert P._fov_to_cull_half(P.CULL_STOCK_FOV) >= P.CULL_LIMITER
+    assert P._fov_to_cull_half(90.0) >= P.CULL_LIMITER
     # without --fov (and no --cull) culling + fog are untouched
     d2 = make_fixture()
     P.apply_patches(d2, "quarter")
     assert d2[0x1e00 + P.CULL_OFF:0x1e00 + P.CULL_OFF + 2] == P.CULL_STOCK.to_bytes(2, "little")
     assert d2[0x1f00 + P.FOGH_OFF:0x1f00 + P.FOGH_OFF + 2] == P.FOGH_STOCK.to_bytes(2, "little")
     assert d2[0x2000 + P.NEARBAND_THRESH_OFF] == 0x05
-    assert int.from_bytes(d2[0x2100 + P.CULLSCALE_OFF:0x2100 + P.CULLSCALE_OFF + 2], "little") == 0x0258
     # --cull on without --fov: culling applied (stock-FOV cone), fog untouched (H unchanged)
     d3 = make_fixture()
     P.apply_patches(d3, "quarter", cull=True)

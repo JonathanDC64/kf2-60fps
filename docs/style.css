@@ -72,6 +72,8 @@ input[type=radio], input[type=checkbox] { accent-color: var(--gold); transform: 
 .fovrow.on { opacity: 1; pointer-events: auto; }
 .fovrow input[type=range] { flex: 1; accent-color: var(--gold); }
 .fovrow .val { font-family: 'Cinzel', serif; color: var(--gold); min-width: 3.2em; text-align: right; }
+.fov-reset { font-family: 'Cinzel', serif; font-size: 0.74em; letter-spacing: 0.08em; color: var(--text-dim); background: transparent; border: 1px solid var(--edge); border-radius: 3px; padding: 0.15em 0.6em; cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+.fov-reset:hover { color: var(--gold); border-color: var(--gold-dim); }
 
 .file-drop {
   display: block;

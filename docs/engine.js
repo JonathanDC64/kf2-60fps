@@ -44,10 +44,10 @@
     var h = Math.round(ofx / Math.tan((deg * Math.PI / 180) / 2));
     return Math.max(24, Math.min(0x3ff, h));
   }
-  function fovToCullHalf(deg, stock) {
-    var halfDeg = (deg / 2) * (4 / 3) + 12;
+  function fovToCullHalf(deg, limiter) {
+    var halfDeg = (deg / 2) * (4 / 3) + 5;         // 4:3 -> 16:9 widen + ~5deg rotation margin
     var units = Math.round(halfDeg * 4096 / 360);
-    return Math.max(stock, Math.min(0x3a0, units));
+    return Math.max(limiter, Math.min(0x3a0, units));  // >= limiter (always cos-scaled, no flicker)
   }
 
   // Apply all patches to `buf` (Uint8Array, edited in place).
@@ -125,7 +125,7 @@
     var doCull = (cull !== null) ? cull : (fov !== null);
     if (doCull) {
       var cu = manifest.cull, effFov = (fov !== null) ? fov : cu.stock_fov;
-      var half = fovToCullHalf(effFov, cu.cone.stock);
+      var half = fovToCullHalf(effFov, cu.limiter);
       var co = cu.cone, ci = findOnce(buf, hexToBytes(co.sig), lo, hi, "cull");
       if (readU16(buf, ci + co.off) !== co.stock) throw new Error("cull imm mismatch");
       writeLE(buf, ci + co.off, half, 2);
@@ -134,9 +134,6 @@
       writeLE(buf, ni + nb.thresh_off, nb.thresh_new, 2);
       writeLE(buf, ni + nb.nop1, 0, 4);
       writeLE(buf, ni + nb.nop2, 0, 4);
-      var cs = cu.cullscale, si = findOnce(buf, hexToBytes(cs.sig), lo, hi, "cullscale");
-      if (readU16(buf, si + cs.off) !== 0x0258) throw new Error("cullscale imm mismatch");
-      writeLE(buf, si + cs.off, cs.new, 2);
       log.push("cull(half=0x" + half.toString(16) + ")");
     }
     return log;

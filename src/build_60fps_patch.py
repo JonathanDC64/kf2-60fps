@@ -299,25 +299,34 @@ CULL_SIG = bytes.fromhex("ff034224" "83120200" "b8015524" "68db010c")  # addiu v
 CULL_OFF = 0x08                     # the 16-bit immediate (0x01b8) of `addiu s5,v0,0x1b8`
 CULL_STOCK = 0x01b8                 # 38.7deg half-angle == 77.3deg total (the stock view cone)
 
-# --- CULL draw-distance scaling -- FUN_80034bf4 shortens the visible draw distance for WIDE cones:
-# `if (cone_half >= 0x258) uVar21 = drawdist^2 * cos(cone_half/2)` (a cell-count limiter). Widening
-# the cull cone trips this, so the CENTER draw distance shrinks vs stock (~13->12 cells = geometry
-# culls closer straight ahead). We disable it by forcing the `slti v0,s5,0x258` @0x80034dd0 always
-# true (s5 = cone half-angle, max ~0x3a0), so uVar21 stays the full stock drawdist^2 regardless of
-# cone width -- the cone is then purely an angular cull, not a distance cut. @0x80034dd0.
-CULLSCALE_SIG = bytes.fromhex("12100000" "21986200" "5802a22a" "08004010" "21f06401")  # mflo/addu/slti s5,0x258/beq/addu
-CULLSCALE_OFF = 0x08                # the `slti v0,s5,0x258` immediate (0x0258) -> always-true threshold
-CULLSCALE_NEW = 0x4000              # s5 < 0x4000 always (signed, positive) -> never scale the distance
+# --- CULL draw-distance limiter (0x258) -- the cone half-angle `s5`/iVar22 (FUN_80034bf4) is NOT a
+# fixed value: it's `base + pitch_term`, where pitch_term >= 0 grows as you look up/down. The function
+# has a DISCONTINUITY at 0x258: `if (iVar22 < 0x258) uVar21 = drawdist^2;  else uVar21 =
+# drawdist^2 * cos(iVar22/2)` (the cos branch keeps a wide cone's lateral extent inside the fixed
+# 25x25 PVS grid). The trap: if `base` sits NEAR 0x258, tiny pitch (camera bob / slight look up-down
+# while walking) makes iVar22 cross 0x258 back and forth -> draw distance toggles full<->scaled ->
+# edge geometry / skybox FLICKER and pop (the v36 bug: base 0x254 was right at the threshold).
+# Two stable regimes only: base far BELOW 0x258 (the stock 0x1b8 -- too narrow for 16:9), or base
+# AT/ABOVE 0x258 (always in the cos branch -> smooth, never crosses). 16:9 needs ~0x249, so we take
+# the second: keep the cone >= 0x258 so it's ALWAYS cos-scaled. We do NOT touch the 0x258 constant
+# (raising it re-creates the crossing; disabling it overruns the grid -- both flicker). The cost is
+# the engine's own wide-cone trade: ~6% shorter center draw distance, but rock-stable.
+CULL_LIMITER = 0x258                # cone half-angle at/above which the game cos-scales the distance
 
 
 CULL_STOCK_FOV = 77.3               # stock horizontal FOV (H=200) -- used when culling w/o --fov
 
 
 def _fov_to_cull_half(deg):
-    """PVS cone half-angle (KF2 units) covering `deg` horizontal FOV on a 16:9 display + margin."""
-    half_deg = (deg / 2.0) * (4.0 / 3.0) + 12.0     # 4:3->16:9 widen (DuckStation WS), +12deg margin
+    """PVS cone half-angle (KF2 units) covering `deg` horizontal FOV on a 16:9 display + a margin.
+
+    Clamped to be >= CULL_LIMITER (0x258) so the cone sits permanently in the game's cos-scaled
+    branch: iVar22 = base + pitch_term (pitch_term >= 0) then never dips below the 0x258 threshold,
+    so it never crosses the full<->scaled discontinuity and never flickers (see the note above).
+    """
+    half_deg = (deg / 2.0) * (4.0 / 3.0) + 5.0       # 16:9 widen (DuckStation WS) + ~5deg rotation margin
     units = round(half_deg * 4096.0 / 360.0)
-    return max(CULL_STOCK, min(0x3a0, units))        # never narrower than stock; cap < 90deg half
+    return max(CULL_LIMITER, min(0x3a0, units))      # >= limiter (always cos-scaled); cap < 90deg half
 
 
 # --- FOG calibration H (applied with --fov) -- the GTE depth-cue fog (distant geometry fades to the
@@ -726,19 +735,14 @@ def apply_patches(data, mode, fov=None, cull=None):
         data[ni + NEARBAND_NOP2_OFF:ni + NEARBAND_NOP2_OFF + 4] = bytes(4)
         print("NEAR-BAND  @0x%X  near radius 5->0x%x + cone check nop (point-blank corners)" % (
             ni + NEARBAND_THRESH_OFF, NEARBAND_THRESH_NEW))
+        print("  cone half 0x%x >= 0x%x limiter -> always cos-scaled (stable, no pitch-crossing "
+              "flicker; ~6%% shorter center draw distance is the engine's wide-cone trade-off)" % (
+                  half, CULL_LIMITER))
 
-        # Keep the full stock draw distance: disable the wide-cone cos() distance scaling so the
-        # widened cull cone doesn't shorten how far you see straight ahead.
-        si = find_once(data, CULLSCALE_SIG, "cullscale")
-        assert int.from_bytes(data[si + CULLSCALE_OFF:si + CULLSCALE_OFF + 2], "little") == 0x0258, \
-            "cullscale imm mismatch"
-        data[si + CULLSCALE_OFF:si + CULLSCALE_OFF + 2] = CULLSCALE_NEW.to_bytes(2, "little")
-        print("CULL-SCALE @0x%X  cone distance-scaling off (full stock draw distance kept)" % (
-            si + CULLSCALE_OFF))
-
-        # (No FAR-CULL trim: the far "ring" is the black backdrop that hides the draw edge straight
-        # ahead. Trimming it exposes the edge as center popping -- so we leave it at the stock 0x100.
-        # The remaining distant *side* popping is inherent to KF2's forward-Z depth fog at wide FOV.)
+        # (We deliberately leave the 0x258 limiter alone and keep the cone >= it so iVar22 stays in
+        # the cos-scaled branch for ALL camera pitches -- no full<->scaled crossing -> no flicker.
+        # Disabling it (v35) overran the 25x25 grid; sitting it at the threshold (v36) flickered.
+        # The remaining distant *side* popping at wide --fov is inherent to KF2's forward-Z fog.)
 
 
 def make_bps(source, target):
@@ -796,10 +800,12 @@ def main(argv=None):
                          "fog is forward-Z based) and may pop. Recommended widescreen mode is the "
                          "stock FOV + --cull on. See docs/RESEARCH.md sec.13.")
     ap.add_argument("--cull", choices=("on", "off"), default=None,
-                    help="widescreen edge-culling fix (widen the PVS view cone so walls/objects "
-                         "stop popping at the 16:9 edges; also fixes the bottom corners). Default: "
-                         "on when --fov is set, else off. An explicit --cull on/off overrides that. "
-                         "Use --cull on (without --fov) for stock-FOV widescreen.")
+                    help="[EXPERIMENTAL] widescreen edge-culling fix (widen the PVS view cone so "
+                         "walls/objects stop popping at the 16:9 edges; also fixes the bottom "
+                         "corners). Default: on when --fov is set, else off. An explicit --cull "
+                         "on/off overrides that. Known limitation: the cone is bounded by KF2's "
+                         "fixed visibility grid, so a small rotation margin remains and edge "
+                         "geometry can pop slightly during fast turns.")
     ap.add_argument("--no-crc-check", action="store_true",
                     help="skip the source size/CRC verification")
     args = ap.parse_args(argv)

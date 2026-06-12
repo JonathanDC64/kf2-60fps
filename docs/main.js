@@ -10,6 +10,8 @@
   var fileInput = $("fileInput"), drop = $("drop"), forge = $("forge"), status = $("status");
   var downloads = $("downloads"), cull = $("cull"), fovEnable = $("fovEnable");
   var fov = $("fov"), fovVal = $("fovVal"), fovRow = $("fovRow"), wantBps = $("wantBps");
+  var fovReset = $("fovReset");
+  var FOV_DEFAULT = 77;            // the game's stock horizontal FOV (shown for reference)
 
   var srcBytes = null, srcName = "", urls = [];
 
@@ -161,6 +163,9 @@
     if (fovEnable.checked) cull.checked = true;   // FOV auto-enables culling (mirrors the CLI)
   });
   fov.addEventListener("input", function () { fovVal.textContent = fov.value + "°"; });
+  fovReset.addEventListener("click", function () {
+    fov.value = FOV_DEFAULT; fovVal.textContent = FOV_DEFAULT + "°";
+  });
   forge.addEventListener("click", doForge);
 
   // ---- load the manifest ----

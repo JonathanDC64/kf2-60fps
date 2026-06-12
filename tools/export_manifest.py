@@ -144,11 +144,11 @@ def build():
     }
     m["cull"] = {
         "stock_fov": P.CULL_STOCK_FOV,
+        "limiter": P.CULL_LIMITER,          # clamp floor: keep the cone >= this (always cos-scaled)
         "cone": {"sig": hx(P.CULL_SIG), "off": P.CULL_OFF, "stock": P.CULL_STOCK},
         "nearband": {"sig": hx(P.NEARBAND_SIG), "thresh_off": P.NEARBAND_THRESH_OFF,
                      "thresh_new": P.NEARBAND_THRESH_NEW,
                      "nop1": P.NEARBAND_NOP1_OFF, "nop2": P.NEARBAND_NOP2_OFF},
-        "cullscale": {"sig": hx(P.CULLSCALE_SIG), "off": P.CULLSCALE_OFF, "new": P.CULLSCALE_NEW},
     }
     return m
 

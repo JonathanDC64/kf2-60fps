@@ -684,8 +684,10 @@ KF2 is grid-based: an 80×80 cell map at `DAT_801d4464` (10 bytes/cell, stride 8
 The cone half-angle is the immediate of `addiu s5,v0,0x1b8` @`0x80034c80`: **`0x1b8` = 38.7° (KF2
 units, 0x1000=360°) = 77.3° total == the stock FOV exactly.** So at a wider FOV (or DuckStation's
 16:9), cells in the new edge band are never flagged → walls/objects pop in/out. **`CULL` fix:** widen
-that immediate to cover the displayed FOV — `half ≈ (fov/2)·(4/3 for 16:9) + 12° margin`, clamped
-`[0x1b8, 0x3a0]`. (Stock-FOV `--cull on` uses 77.3°.)
+that immediate to cover the displayed FOV — `half ≈ (fov/2)·(4/3 for 16:9) + ~5° margin`, then
+**clamped to `[0x258, 0x3a0]`** so it sits at/above the `0x258` draw-distance limiter (see §13.4.1 —
+this is what makes it flicker-free). Stock `--cull on` lands at `0x283` (~56.5° half = ~113° total),
+covering the 16:9 edge (~103°) with a ~5° rotation margin.
 
 Per-cell distance bands in `FUN_80034bf4` (cell radial dist² = `uVar9`):
 - `uVar9 < 5` **near band** — `0x1e`, *but still cone-tested* (`bgtz a0`/`bltz a1` @0x80034eb0/eb8).
@@ -703,6 +705,37 @@ Per-cell distance bands in `FUN_80034bf4` (cell radial dist² = `uVar9`):
    forward-Z → fully fogged black → they're the **backdrop that hides the draw-distance edge**.
    Trimming the ring (tried `FARCULL` 0x100→0x90, v32) removed that backdrop and exposed the edge as
    *center* popping. So: don't trim it.
+
+#### 13.4.1 The `0x258` draw-distance limiter — keep the cone ABOVE it (the v34→v37 saga)
+The cone half-angle is **not constant** — from the decomp:
+```c
+iVar22 = (pitch_term >> 10) + 0x1b8;            // base 0x1b8 + a pitch term that is always >= 0
+...
+if (iVar22 < 0x258) uVar21 = drawdist²;                       // FULL radius (the "if" branch)
+else                uVar21 = drawdist² * rcos(iVar22>>1) >>12;// cos-SCALED radius (the "else" branch)
+```
+`iVar22 = base + pitch_term`, and **pitch_term ≥ 0 grows as you look up/down**. So there's a
+**full↔scaled discontinuity at `0x258`**, and the danger is a base that sits *near* it: the camera's
+constant tiny pitch wobble (head-bob, looking slightly down while walking) makes `iVar22` cross
+`0x258` every few frames → the draw radius pops between full and scaled → **flicker, vanishing
+skybox, mid-distance geometry dropping.** The cos branch exists to keep a wide cone's *lateral*
+extent inside the fixed **25×25 PVS grid** (as the cone widens with pitch, the radius shrinks so the
+sides stay in-grid). Two stable regimes only: base far **below** `0x258` (stock `0x1b8` — too narrow
+for 16:9), or base **at/above** `0x258` (permanently in the cos branch — smooth, never crosses).
+
+- **v34** base `0x2d3` (>`0x258`) → *always* scaled → stable, but ~13→12 cells ("culls faster").
+- **v35** disabled the limiter (`CULL-SCALE` 0x258→0x4000) → full radius 13 at a 63°+pitch cone →
+  **overran the 25×25 grid** → edge/skybox flicker.
+- **v36** put the base *at* the threshold (`0x254`, just under `0x258`) → crossed `0x258` on the
+  slightest pitch → **the same flicker, now from threshold-crossing** (confirmed on the stock-FOV build).
+- **v37 (current):** clamp the cone **≥ `0x258`** (stock lands at `0x283`) so `iVar22` is *always*
+  in the cos branch for every pitch → no crossing, no overrun, no flicker. Leave the `0x258`
+  constant untouched (raising it re-creates a higher crossing; disabling it overruns the grid).
+  Cost: the cone is permanently cos-scaled → ~6% shorter center draw distance. This is the engine's
+  own wide-cone behavior and is the price of a *stable* widened cone given the fixed grid.
+
+`DAT_801aeae9` (the draw-distance value squared into `uVar21`) is **loaded per-scene from map data**
+(`ghidra_mainloop.txt:3749`, default `0xd`), so it can't be statically bumped to win the ~6% back.
 
 ### 13.5 The inherent limit — distant SIDE popping (NOT fixable with radial knobs)
 KF2 **culls/draws by radial distance** (a circle) but **fogs by forward-Z** (depth ahead).

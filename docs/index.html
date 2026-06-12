@@ -11,7 +11,7 @@
 <div class="wrap">
   <header>
     <h1>King's Field II</h1>
-    <div class="sub">60 FPS Speed-Compensation Patcher</div>
+    <div class="sub">60 FPS Patcher</div>
     <div class="rule"></div>
   </header>
 
@@ -54,17 +54,19 @@
 
     <div style="margin-top:0.6rem;border-top:1px solid var(--edge);padding-top:0.6rem">
       <label class="opt"><input type="checkbox" id="cull">
-        <span class="name">Widescreen edge-culling fix</span>
+        <span class="name">Widescreen edge-culling fix <span class="tag-exp">Experimental</span></span>
         <span class="hint">stops walls / objects / corners popping at the 16:9 edges. Use with your
-        emulator's widescreen (16:9) rendering. (Auto-enabled if you set a custom FOV.)</span></label>
+        emulator's widescreen (16:9) rendering. (Auto-enabled if you set a custom FOV.) KF2's fixed
+        visibility grid trims a widened cone, so the center draw distance is ~6% shorter than stock.</span></label>
 
       <label class="opt"><input type="checkbox" id="fovEnable">
         <span class="name">Custom field of view <span class="tag-exp">Experimental</span></span>
         <span class="hint">widen the FOV (stock ≈ 77°). Known issue: at a wide FOV, distant geometry
         at the far left/right can't be fully fogged and may pop. Stock FOV + culling is cleanest.</span></label>
       <div class="fovrow" id="fovRow">
-        <input type="range" id="fov" min="60" max="120" step="1" value="90">
-        <span class="val" id="fovVal">90°</span>
+        <input type="range" id="fov" min="60" max="120" step="1" value="77">
+        <span class="val" id="fovVal">77°</span>
+        <button type="button" id="fovReset" class="fov-reset" title="Reset to the game's default FOV">Reset</button>
       </div>
     </div>
 
