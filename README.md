@@ -1,5 +1,7 @@
 # King's Field II (USA) — 60 FPS Patch
 
+### ▶ [Patch your copy in the browser — no install](https://jonathandc64.github.io/kf2-60fps/)
+
 A patcher that makes **King's Field II (USA, SLUS-00255)** run at a smooth **60 FPS**
 while keeping the game playing at its original speed.
 
