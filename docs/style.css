@@ -43,6 +43,7 @@ header h1 {
   margin: 0;
 }
 header .sub { color: var(--text-dim); font-style: italic; margin-top: 0.3rem; }
+header .sub .ver { font-style: normal; font-family: ui-monospace, Consolas, monospace; font-size: 0.82em; color: var(--gold-dim); margin-left: 0.4rem; }
 header .rule {
   height: 2px; width: 60%; margin: 1rem auto 0;
   background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);

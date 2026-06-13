@@ -172,6 +172,7 @@
   // ---- load the manifest ----
   fetch("patches.json").then(function (r) { return r.json(); }).then(function (m) {
     manifest = m;
+    if (m.meta.version) $("version").textContent = "v" + m.meta.version;
     $("serial").textContent = m.meta.serial;
     $("x-size").textContent = m.meta.src_size.toLocaleString() + " B";
     $("x-crc").textContent = m.meta.src_crc32;

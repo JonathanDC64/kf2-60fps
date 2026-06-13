@@ -34,6 +34,10 @@ import math
 import sys
 import zlib
 
+# Patcher version (single source of truth -- exported to the manifest, shown on the CLI + web UI).
+# See CHANGELOG.md. Bump on every user-visible change.
+VERSION = "1.3.0"
+
 # Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
 SRC_SERIAL = "SLUS-00255"
 SRC_SIZE = 571766496
@@ -830,6 +834,7 @@ def make_bps(source, target):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="King's Field II (USA) 60 fps patcher")
+    ap.add_argument("--version", action="version", version="kf2-60fps %s" % VERSION)
     ap.add_argument("input", help="path to your King's Field II (USA) .bin (MODE2/2352)")
     ap.add_argument("output", help="path to write the patched .bin")
     ap.add_argument("--mode", choices=("quarter", "half"), default="quarter",
@@ -856,6 +861,7 @@ def main(argv=None):
     ap.add_argument("--no-crc-check", action="store_true",
                     help="skip the source size/CRC verification")
     args = ap.parse_args(argv)
+    print("King's Field II (USA) 60 FPS patcher  v%s" % VERSION)
     if args.fov is not None and not (40.0 <= args.fov <= 150.0):
         ap.error("--fov must be between 40 and 150 degrees")
     cull = None if args.cull is None else (args.cull == "on")

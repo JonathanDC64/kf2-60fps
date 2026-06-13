@@ -36,6 +36,7 @@ def per_mode(d):
 def build():
     m = {
         "meta": {
+            "version": P.VERSION,               # patcher version (shown in the web UI)
             "serial": P.SRC_SERIAL,             # SLUS-00255 (King's Field II, USA)
             "src_size": P.SRC_SIZE,
             "src_crc32": "%08X" % P.SRC_CRC32,

@@ -3,6 +3,8 @@
 A patcher that makes **King's Field II (USA, SLUS-00255)** run at a smooth **60 FPS**
 while keeping the game playing at its original speed.
 
+Current version: **v1.3.0** (`python src/build_60fps_patch.py --version`) — see [CHANGELOG.md](CHANGELOG.md).
+
 The original game runs its logic once per rendered frame and is hard-capped at ~15 FPS.
 If you simply uncap it (e.g. via emulator overclock), everything runs ~4× too fast. This
 patch raises the cap to 60 FPS **and** scales each per-frame system back down so the game
