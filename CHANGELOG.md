@@ -5,10 +5,17 @@ All notable changes to the King's Field II (USA) 60 FPS patcher. Format based on
 (`--version`) and in the web UI, sourced from `VERSION` in `src/build_60fps_patch.py`.
 
 ## [Unreleased]
-- Poison-damage tick, player death animation, secret-door / key-use animation, and enemy
-  hit-flash: under investigation (live PCSX-Redux probing).
+- Player death animation, secret-door / key-use animation, and enemy hit-flash: under
+  investigation (live PCSX-Redux probing).
 - Projectile speed: **deferred** — pooled particle/effect system with no single position-mover
   to scale safely (see RESEARCH §15).
+
+## [1.4.0] — 2026-06-13 — Poison
+### Fixed
+- **Poison / damage-over-time** ticked ~4× too fast at 60 fps (HP drained every ~2 s instead of ~8 s).
+  Widened the tick modulus 30 → 120 (÷4; 30 → 60 in half mode) in the poison handler so it ticks at
+  the original rate. Found via live probing (HP at `0x801b24fc`; tick `(counter % 30)==0` at
+  `0x80031e9c`). See RESEARCH §16.
 
 ## [1.3.0] — 2026-06-12 — Camera & head-bob
 ### Added

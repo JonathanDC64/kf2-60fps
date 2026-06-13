@@ -72,6 +72,10 @@ def build():
                                      "new": per_mode(P.LOOK_NEW)}])
     edit("look_dn", P.LOOK_DN_SIG, [{"off": P.LOOK_OFF, "w": 4, "old": P.LOOK_OLD,
                                      "new": per_mode(P.LOOK_NEW)}])
+    # POISON: damage-over-time tick modulus 30 -> 120/60 (divide shift + reconstruct multiply)
+    edit("poison", P.POISON_SIG, [
+        {"off": P.POISON_DIV_OFF, "w": 4, "old": P.POISON_DIV_OLD, "new": per_mode(P.POISON_DIV_NEW)},
+        {"off": P.POISON_MUL_OFF, "w": 4, "old": P.POISON_MUL_OLD, "new": per_mode(P.POISON_MUL_NEW)}])
     edit("magdelay", P.MAGDELAY_SIG, [{"off": P.MAGDELAY_OFF, "w": 1, "old": 0x3c,
                                        "new": per_mode(P.MAGDELAY_NEW)}])
     edit("enemyanim", P.ENEMYANIM_SIG, [{"off": P.ENEMYANIM_OFF, "w": 4, "old": 0,

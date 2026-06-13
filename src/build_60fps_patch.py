@@ -36,7 +36,7 @@ import zlib
 
 # Patcher version (single source of truth -- exported to the manifest, shown on the CLI + web UI).
 # See CHANGELOG.md. Bump on every user-visible change.
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
 SRC_SERIAL = "SLUS-00255"
@@ -100,6 +100,22 @@ LOOK_DN_SIG = bytes.fromhex("4e264284" "00000000" "0e004104" "21184000")  # lh v
 LOOK_OFF = 0x0c                    # the `addu v1,v0,zero` (00401821) word -> `sra v1,v0,N`
 LOOK_OLD = 0x00401821              # addu v1,v0,zero
 LOOK_NEW = {"quarter": 0x00021883, "half": 0x00021843}   # sra v1,v0,2 / sra v1,v0,1
+
+# --- POISON: poison / damage-over-time tick (handler @0x80031e9c). HP -1 fires when the poison
+# countdown DAT_801b255c satisfies `(a0 % 30) == 0` (computed by a magic-divide: `mult a0,0x88888889
+# / mfhi / addu / sra v1,v1,4` = a0/30, then `*30` reconstruct and `a0 - that`). At 60fps the counter
+# advances 4x faster -> poison ticks ~4x too often (verified live: -1 HP every ~120 frames). We widen
+# the modulus 30 -> 120 (quarter) / 60 (half) with two single-shift edits: the divide `sra v1,v1,4`
+# -> `,6`/`,5` (a0/30 -> a0/120 / a0/60) and the reconstruct `sll v0,v0,1` -> `,3`/`,2` (*30 -> *120 /
+# *60). Result: tick fires only at multiples of 120/60 (exact, no bursts) -> poison ticks /4 (/2).
+POISON_SIG = bytes.fromhex("8888023c" "89884234" "18008200" "c3170500" "10180000" "21186400"
+                           "03190300" "23186200" "00110300" "23104300" "40100200" "23108200")
+POISON_DIV_OFF = 0x18              # `sra v1,v1,4` (0x00031903) -- divide shift
+POISON_DIV_OLD = 0x00031903
+POISON_DIV_NEW = {"quarter": 0x00031983, "half": 0x00031943}   # sra v1,v1,6 (/120) / sra v1,v1,5 (/60)
+POISON_MUL_OFF = 0x28              # `sll v0,v0,1` (0x00021040) -- reconstruct multiply
+POISON_MUL_OLD = 0x00021040
+POISON_MUL_NEW = {"quarter": 0x000210c0, "half": 0x00021080}   # sll v0,v0,3 (*120) / sll v0,v0,2 (*60)
 
 # --- ENEMY movement (code cave). All enemy movement funnels through FUN_8004dbc8,
 # which loads per-frame velocity (vx=s3, vz=s0) then does enemy.pos += vx/vz. No free
@@ -599,6 +615,15 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
         data[li + LOOK_OFF:li + LOOK_OFF + 4] = LOOK_NEW[mode].to_bytes(4, "little")
         print("LOOK       @0x%X  %s  addu v1,v0,zero -> sra v1,v0,%d (vertical camera /%d)" % (
             li + LOOK_OFF, nm, 2 if mode == "quarter" else 1, 4 if mode == "quarter" else 2))
+
+    pz = find_once(data, POISON_SIG, "poison")
+    assert int.from_bytes(data[pz + POISON_DIV_OFF:pz + POISON_DIV_OFF + 4], "little") == POISON_DIV_OLD \
+        and int.from_bytes(data[pz + POISON_MUL_OFF:pz + POISON_MUL_OFF + 4], "little") == POISON_MUL_OLD, \
+        "poison byte mismatch"
+    data[pz + POISON_DIV_OFF:pz + POISON_DIV_OFF + 4] = POISON_DIV_NEW[mode].to_bytes(4, "little")
+    data[pz + POISON_MUL_OFF:pz + POISON_MUL_OFF + 4] = POISON_MUL_NEW[mode].to_bytes(4, "little")
+    print("POISON     @0x%X  tick modulus 30->%d (poison/DoT /%d)" % (
+        pz, 120 if mode == "quarter" else 60, 4 if mode == "quarter" else 2))
 
     # GAME.EXE byte-0 in the raw .bin (anchor for cave offset math).
     je = find_once(data, ENEMY_JSIG, "enemy")

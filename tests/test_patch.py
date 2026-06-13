@@ -47,6 +47,7 @@ SIGS = {
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "dropedge": (0x1c00, P.DROPEDGE_SIG),
     "look_up": (0x2100, P.LOOK_UP_SIG), "look_dn": (0x2200, P.LOOK_DN_SIG),
+    "poison": (0x2400, P.POISON_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -105,6 +106,11 @@ def test_quarter_byte_edits():
     for look_off in (0x2100, 0x2200):
         assert int.from_bytes(d[look_off + P.LOOK_OFF:look_off + P.LOOK_OFF + 4], "little") == \
             P.LOOK_NEW["quarter"]
+    # POISON: tick modulus 30 -> 120 (divide shift /120 + reconstruct ×120)
+    assert int.from_bytes(d[0x2400 + P.POISON_DIV_OFF:0x2400 + P.POISON_DIV_OFF + 4], "little") == \
+        P.POISON_DIV_NEW["quarter"]
+    assert int.from_bytes(d[0x2400 + P.POISON_MUL_OFF:0x2400 + P.POISON_MUL_OFF + 4], "little") == \
+        P.POISON_MUL_NEW["quarter"]
 
 
 def test_half_mode():
@@ -127,6 +133,10 @@ def test_half_mode():
     for look_off in (0x2100, 0x2200):                              # LOOK pitch advance ÷2 (sra v1,v0,1)
         assert int.from_bytes(d[look_off + P.LOOK_OFF:look_off + P.LOOK_OFF + 4], "little") == \
             P.LOOK_NEW["half"]
+    assert int.from_bytes(d[0x2400 + P.POISON_DIV_OFF:0x2400 + P.POISON_DIV_OFF + 4], "little") == \
+        P.POISON_DIV_NEW["half"]                                    # poison modulus 30 -> 60 (÷2)
+    assert int.from_bytes(d[0x2400 + P.POISON_MUL_OFF:0x2400 + P.POISON_MUL_OFF + 4], "little") == \
+        P.POISON_MUL_NEW["half"]
     assert d[0x2300:0x2300 + len(P.BOBFIX_NEW["half"])] == P.BOBFIX_NEW["half"]   # bob phase ÷2
 
 

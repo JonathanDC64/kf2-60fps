@@ -843,3 +843,28 @@ other per-frame systems. Documented so we don't re-walk this:
 To actually fix this would require reverse-engineering the effect/particle update pipeline (which
 function walks the active projectile list and advances it, and how its step is derived) and scaling
 that — a substantial job with cross-effect risk. Deferred in favor of higher-value, lower-risk items.
+
+## 16. Poison / damage-over-time tick (POISON)
+
+Reported issue: poison drains HP ~4× too fast at 60 fps. Found by live probing (PCSX-Redux):
+player HP is a u16 at **`0x801b24fc`** (DuckStation Memory Scanner found it; physical `0x001b24fc`).
+A write-breakpoint on HP while poisoned showed the tick written by **`PC=0x8002a6d8`** — the generic
+"apply HP delta" helper `FUN_8002a6a0` (loads HP, `+a0`, clamps ≥0, stores), called with `a0=-1`.
+Observed cadence: **−1 HP every ~120 frames** (≈2 s at 60 fps; the original 15 fps made those 120
+frames ≈8 s — hence 4× too fast).
+
+The 120-frame cadence is set by the poison handler at **`0x80031e9c`**: it reads the poison countdown
+`DAT_801b255c` into `a0` and ticks when **`(a0 % 30) == 0`**, where the `% 30` is a magic-divide:
+```
+mult a0,0x88888889 / mfhi v1 / addu v1,v1,a0 / sra v1,v1,4   ; v1 = a0 / 30
+sll v0,v1,4 / subu v0,v0,v1 / sll v0,v0,1                    ; v0 = v1 * 30
+subu v0,a0,v0                                                ; v0 = a0 % 30  -> tick when 0
+... on tick: reset DAT_801b2658=0x960, DAT_801b265a=0x3c, then FUN_8002a6a0(-1)
+```
+`a0` advances one unit every ~4 frames, so `%30` ⇒ a tick per ~120 frames.
+
+**Fix (POISON):** widen the modulus **30 → 120** (quarter; → 60 in half mode) with two single-shift
+edits — the divide `sra v1,v1,4 → ,6` (`a0/30 → a0/120`) and the reconstruct `sll v0,v0,1 → ,3`
+(`*30 → *120`). The tick then fires only at multiples of 120 (exact — no bursting, since each
+`a0` value is distinct), so poison ticks at 1/4 the rate (~8 s/tick), matching the original.
+This handler is the shared DoT path, so any similar status drain scales with it.
