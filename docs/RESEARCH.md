@@ -815,3 +815,31 @@ unchanged. **`--bob off`:** the original disable — store 0 to the bob output `
 | Pitch apply sites | `0x8002f92c` / `0x8002f974` | `addu v1,v0,zero` → `sra v1,v0,N` (up / down) |
 | Head-bob | `FUN_8002ed60` @`0x8002f298` | phase `DAT_801b2652` += `DAT_801b264a`; reorder+`sra` to scale |
 | Bob output | `0x8002f2e0` | `sh v0,0x2650` → `sh zero` for `--bob off` |
+
+## 15. Projectiles — pooled particle/effect system (DEFERRED, no clean speed knob)
+
+Reported issue: enemy projectiles travel ~4× too fast at 60 fps. Investigated live in PCSX-Redux
+(RAM-diff with background subtraction + write-breakpoints; see `KF2Recomp/projectile_hunt.lua` and
+`projectile_bp.lua`). Conclusion: **there is no single "projectile.position += velocity" instruction
+to scale** — projectiles are a pooled, particle-style effect, so a safe ÷4 isn't a one-liner like the
+other per-frame systems. Documented so we don't re-walk this:
+
+- **Not in the actor array.** The 200-entity actor pool (`0x80185da8`, stride `0x88`) shows **no new
+  slot and no type-byte change** when an enemy fires — projectiles live elsewhere.
+- **Pooled via a free list.** The firing enemy stores a pointer to its projectile node in its own
+  struct (e.g. enemy@`0x80186d10` `+0x5c` ← `0x801aab64`). The node lives in a pool around
+  `0x801aa000`–`0x801ae000`. Node header `+0x0` and a **next-link pointer `+0xc`** are managed by an
+  allocator/free-list at **`0x80043xxx`**: alloc `0x800432dc`/`0x800432f4` (`sh s0,2(v0)` / `sw
+  v0,0xc(v1)`), free `FUN_80043894` (`sh zero,0(s0)` / `sw zero,0xc(s0)`), pool-init loop `0x80043860`.
+  These are allocation bookkeeping, **not** motion.
+- **Visual data is shared scratch.** The fields that actually move during flight (`0x801aadxx`–
+  `0x801aaexx`) are written by **many scattered PCs** (`0x8003abd8`, `0x8003677c`, `0x800404c8`,
+  `0x8003f158`, `0x80039e10`, …) — i.e. shared transform/particle scratch reused by lots of effects,
+  not a dedicated projectile mover. Scaling there would corrupt unrelated effects.
+- **Big noise sources to skip when probing here:** the per-frame **render/geometry buffer**
+  (~`0x80199000`–`0x801a0000`, values ~1.17M) and the **PVS visibility grid** (`0x801aec84`, full of
+  `0x1e1e1e1e` cell flags) — both rebuild every frame and flood naïve value scans.
+
+To actually fix this would require reverse-engineering the effect/particle update pipeline (which
+function walks the active projectile list and advances it, and how its step is derived) and scaling
+that — a substantial job with cross-effect risk. Deferred in favor of higher-value, lower-risk items.
