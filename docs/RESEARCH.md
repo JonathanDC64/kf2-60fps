@@ -844,6 +844,38 @@ To actually fix this would require reverse-engineering the effect/particle updat
 function walks the active projectile list and advances it, and how its step is derived) and scaling
 that — a substantial job with cross-effect risk. Deferred in favor of higher-value, lower-risk items.
 
+### 15.1 Exhaustive 2nd pass (DuckStation + static) — confirmed UNFIXABLE, full map
+
+A later deep dive (DuckStation memory scanner + write-breakpoint + static disasm) traced the whole
+billboard projectile pipeline end-to-end. Recording it so this is never re-walked:
+
+- **It's a billboard particle.** User confirmed projectiles render as billboards.
+- **Render** = `FUN_8003c35c` (one of several particle renderers; `0x8003f120`'s function is another,
+  and is projectile-*only* for model `0x800d8aa0`). The object is DMA-copied to **scratchpad
+  `0x1f800000`** for rendering (so render-time `s1`/`s3` are scratchpad, dead ends for the RAM object).
+- **What the scanner finds** (slow-mo + iterative "Decreased"): the 4 stride-8 equal values at
+  `0x801aac58/60/68/70` are the **billboard quad's OT (ordering-table) depth** — `~2000` decreasing as
+  it nears, written by `0x8003c754` (`sh v0,0(v1)`, `v0 = [s1+0x5c]>>2`). Pure render output, reused
+  for other effects when no projectile (goes to large garbage).
+- **Position is in the GTE chain, not a flat field.** In `FUN_8003c35c` the particle's coords are read
+  at `[s2+2/4/6]` and `[s2+0xa/0xc/0xe]` and fed through transforms (`FUN_80074910`, `FUN_80076168`)
+  to build the GTE rotation+translation `[s4+0x00..0x10]` (matrix) / `[s4+0x14/18/1c]` (TR =
+  world/camera translation). No single in-place `pos += vel` coordinate appears anywhere in a full RAM
+  scan (`0x80100000–0x801b3000`) — only render/transform output and OT/display-list churn.
+- **The particle ring is FIXED EXE data** at `0x80081C20` (`lui 0x8008; addiu 7200` @`0x8003c368`;
+  s2 = ring + 6 + entry). NOT a heap pool — but entries are tagged/typed and a projectile occupies a
+  slot only for its lifetime, so fixed-address watchpoints still go stale between shots. (This ring is
+  the `0x80081c69` zero-run that froze the game when used as a cave — it's live particle data.)
+- **Updater** = `FUN_800422c0` — but it's a high-level **per-frame orchestrator** (calls camera/PVS
+  `FUN_80034bf4`/etc.) plus a multi-type particle pass. Its motion math is a shared **phase
+  accumulator** `[gp+0xd8]` that *decays ⅛ per frame* with `position += [gp+0xd8]>>6` — i.e.
+  decaying/oscillation, NOT constant-velocity flight. There is **no single linear-velocity constant**
+  to scale, and the one global lever (`[gp+0xd8]` increment) drives a decay effect, not projectiles.
+
+**Verdict: no safe, projectile-specific (or even particle-global) speed knob exists.** Scaling
+anything reachable here either misses projectiles or risks every effect via shared phase math.
+Permanently deferred. (Probe scripts from this pass: `KF2Recomp/proj_*.lua`, `projectile_motion.lua`.)
+
 ## 16. Poison / mist drain + the shared damage-flash (FIXED for poison; mist drain partial)
 
 Reported issues: poison damage ticks ~4× too fast at 60 fps; the poison-**mist** field drains HP far
