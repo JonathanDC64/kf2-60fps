@@ -136,6 +136,13 @@ def build():
          [{"off": P.GRAV_INC_OFF, "w": 1, "old": 0x28, "new": per_mode(P.GRAV_INC_NEW)}],
          cave_obj={"patch_off": P.GRAV_REDIR_OFF, "old": P.GRAV_REDIR_OLD, "jmp": "%08x" % P.GRAV_JMP,
                    **cave(P.GRAV_CAVE_VADDR, P.GRAV_CAVE)})
+    # POISON / MIST: nop the in-line flash store (op) + redirect the tick body to the ÷N gate cave.
+    _poison_flash_old = int.from_bytes(bytes.fromhex(P.POISON_FLASH_OLD), "little")
+    edit("poison", P.POISON_SIG,
+         [{"off": P.POISON_FLASH_OFF, "w": 4, "old": _poison_flash_old,
+           "new": {"quarter": 0, "half": 0}}],
+         cave_obj={"patch_off": P.POISON_REDIR_OFF, "old": P.POISON_REDIR_OLD,
+                   "jmp": "%08x" % P.POISON_JMP, **cave(P.POISON_CAVE_VADDR, P.POISON_CAVE)})
 
     # ---- patched by absolute vaddr, not signature search (the menu flush copy) ----
     m["menucap"] = {"vaddr": P.MENUCAP_VADDR, "sig": hx(P.MENUCAP_SIG), "off": P.MENUCAP_OFF,

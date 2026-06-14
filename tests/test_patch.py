@@ -25,6 +25,7 @@ GRAV_CAVE_OFF = P._bin_off(P._file_off(P.GRAV_CAVE_VADDR))
 FIREANIM_CAVE_OFF = P._bin_off(P._file_off(P.FIREANIM_CAVE_VADDR))
 WATERSCROLL_CAVE_OFF = P._bin_off(P._file_off(P.WATERSCROLL_CAVE_VADDR))
 DROPEDGE_CAVE_OFF = P._bin_off(P._file_off(P.DROPEDGE_CAVE_VADDR))
+POISON_CAVE_OFF = P._bin_off(P._file_off(P.POISON_CAVE_VADDR))
 MENUCAP_OFF_FIX = P._bin_off(P._file_off(P.MENUCAP_VADDR))      # menu flush is patched by address
 
 # Where we drop the search-located signatures (anywhere clear of caves/anchor).
@@ -47,6 +48,7 @@ SIGS = {
     "waterscroll": (0x1400, P.WATERSCROLL_SIG),
     "dropedge": (0x1c00, P.DROPEDGE_SIG),
     "look_up": (0x2100, P.LOOK_UP_SIG), "look_dn": (0x2200, P.LOOK_DN_SIG),
+    "poison": (0x2400, P.POISON_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 
@@ -159,6 +161,10 @@ def test_cave_redirects_and_bodies():
         P.WATERSCROLL_JMP.to_bytes(4, "little")
     assert d[0x1c00 + P.DROPEDGE_OFF:0x1c00 + P.DROPEDGE_OFF + 4] == \
         P.DROPEDGE_JMP.to_bytes(4, "little")
+    # POISON: tick body redirected to the ÷N cave AND the in-line flash store nopped.
+    assert d[0x2400 + P.POISON_REDIR_OFF:0x2400 + P.POISON_REDIR_OFF + 4] == \
+        P.POISON_JMP.to_bytes(4, "little")
+    assert d[0x2400 + P.POISON_FLASH_OFF:0x2400 + P.POISON_FLASH_OFF + 4] == b"\0\0\0\0"
     for off, words in ((ENEMY_CAVE_OFF, P.ENEMY_CAVE["quarter"]),
                        (ATK_CAVE_OFF, P.ATTACK_CAVE["quarter"]),
                        (MAG_CAVE_OFF, P.MAGIC_CAVE["quarter"]),
@@ -167,7 +173,8 @@ def test_cave_redirects_and_bodies():
                        (GRAV_CAVE_OFF, P.GRAV_CAVE["quarter"]),
                        (FIREANIM_CAVE_OFF, P.FIREANIM_CAVE["quarter"]),
                        (WATERSCROLL_CAVE_OFF, P.WATERSCROLL_CAVE["quarter"]),
-                       (DROPEDGE_CAVE_OFF, P.DROPEDGE_CAVE["quarter"])):  # noqa: E501 reordered for load-delay
+                       (DROPEDGE_CAVE_OFF, P.DROPEDGE_CAVE["quarter"]),
+                       (POISON_CAVE_OFF, P.POISON_CAVE["quarter"])):  # noqa: E501 reordered for load-delay
         got = bytes(d[off:off + 4 * len(words)])
         exp = b"".join(w.to_bytes(4, "little") for w in words)
         assert got == exp

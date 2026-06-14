@@ -843,3 +843,57 @@ other per-frame systems. Documented so we don't re-walk this:
 To actually fix this would require reverse-engineering the effect/particle update pipeline (which
 function walks the active projectile list and advances it, and how its step is derived) and scaling
 that — a substantial job with cross-effect risk. Deferred in favor of higher-value, lower-risk items.
+
+## 16. Poison / mist drain + the shared damage-flash (FIXED for poison; mist drain partial)
+
+Reported issues: poison damage ticks ~4× too fast at 60 fps; the poison-**mist** field drains HP far
+too fast; and a red "damage taken" screen flash blinks too fast. These turned out to be one coupled
+system. Status handler is **`FUN_80031e9c`** (poison + mist share it); HP is the u16 at `0x801b24fc`.
+
+**The tick body (`0x80031ed0`..).** `(timer % 30) == 0` gates a tick (timer = `DAT_801b255c`,
+decremented each call). On a tick: `sh 0x960→DAT_801b2658` (`0x80031edc`), `sh 0x3c→DAT_801b265a`
+(`0x80031ee8`), then `jal FUN_8002a6a0` with `a0=-1` (`0x80031eec`) drains 1 HP. The `%30` is a
+signed div-by-30 idiom (mult by `0x88888889`, `mfhi`, `>>4`).
+
+**`DAT_801b2658` IS the general damage-flash.** Proven live (PCSX-Redux), not guessed:
+- RAM **timeline** (`KF2Recomp/trace_state.lua`, auto-triggered on HP drop): on a melee hit `0x2658`
+  goes `0 → 3500`, then fades `−~12/frame`; on a poison tick it re-spikes to `0x960` (2400).
+- **Write-breakpoint census** (`KF2Recomp/flash_writers.lua`) of all writers of `0x2658`:
+  `0x80030ef8` = the per-frame **fade** (−12/f); `0x80031edc` = the poison/mist tick set (shared!);
+  `0x8002a8cc` = the **melee** hit set; plus a clear at `0x8002b520`. So poison, mist, and melee all
+  drive the *same* flash variable — they can't be told apart by which variable they touch.
+- **Mist vs poison cadence:** poison re-spikes `0x2658` only every ~120 frames (the trace caught one
+  spike per window, residual already faded to ~660); the mist re-enters the tick **every frame**, so
+  `0x2658` is re-pegged faster than the −12/f fade can drop it → a *solid* red screen.
+
+**Why earlier attempts failed.** Gating only the drain (v43) left the flash firing every tick →
+"4 red blinks per 1 HP." Gating the whole tick by redirecting `0x80031ed8` (v44) still blinked,
+because the flash store `0x80031edc` sat in the **branch/jump delay slot** and ran every tick anyway.
+
+**The fix (v47 / shipped).** Redirect `0x80031ed8 (lui at) → j cave` and **nop the flash store**
+`0x80031edc`, so the cave owns both flash and drain. Cave `POISON_CAVE_VADDR = 0x8007f020` (the same
+proven inter-function padding run that holds the working enemy/attack caves — NOT a runtime buffer):
+it always refreshes `0x265a`, then a 1-byte ÷N counter (at cave+0x48 = `0x8007f068`) gates the
+**flash (`0x2658`) and drain (`jal FUN_8002a6a0`) together**, rejoining at `0x80031ef4`. Result:
+poison drains ÷4 with exactly **one blink per HP**; the mist stays solid red (the −12/f fade barely
+dips while the gate still re-pegs `0x2658` every 4th frame) and drains ÷4 slower.
+
+**Two traps that cost iterations (both confirmed by the freeze / no-damage symptoms):**
+1. **Cave location.** `0x80081c80` looked free (1943-byte zero-run) but is a runtime **scratch
+   buffer** — the game overwrote the cave code and the game **froze** the instant a tick fired.
+   Lesson: only use the padding run that already hosts working caves; a big mid-text zero-run is
+   suspect. (GAME.EXE text = `0x80011000`..`0x8009c800`, so "loaded" ≠ "safe".)
+2. **R3000 load-delay slot.** `lbu v0,counter` immediately followed by `addiu v0,v0,1` read the
+   **stale** `v0` (still `0x3c` from the line above), so the counter never advanced and the drain
+   never fired (**no damage at all**). Fix: a `nop` in the load-delay slot. Same hazard the dropedge
+   cave (§12) had to respect.
+
+**Remaining (Unreleased):** the mist's stock drain is *continuous*; ÷4-gating samples it in short
+steps with brief gaps between the enemy's mist emissions. Acceptable but not exact. A future pass
+could give the mist a separate, finer cadence (it's distinguishable from poison by its every-frame
+re-entry) without disturbing the now-correct poison 1-blink-per-HP behavior.
+
+Probe scripts (PCSX-Redux LuaJIT, in `KF2Recomp/`): `trace_state.lua` (HP-triggered RAM timeline,
+writes `trace_out.txt`), `flash_writers.lua` (write-bp census → `flash_writers.txt`),
+`cave_probe.lua` (exec-bp counts of cave entry vs. drain + live counter). Offsets verified against the
+real dump with throwaway scripts that reuse the build's `_file_off`/`_bin_off` math before editing.

@@ -36,7 +36,7 @@ import zlib
 
 # Patcher version (single source of truth -- exported to the manifest, shown on the CLI + web UI).
 # See CHANGELOG.md. Bump on every user-visible change.
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
 SRC_SERIAL = "SLUS-00255"
@@ -297,6 +297,52 @@ DROPEDGE_CAVE = {
                 0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,2
     "half":    [0x94890066, 0x94880018, 0x00094843, 0x01095023, 0x00a8582b,
                 0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,1
+}
+
+# --- POISON / MIST drain + damage-flash sync (status handler FUN_80031e9c) ---
+# The status tick fires when (timer % 30) == 0 (timer = the poison/mist countdown, dec'd each call).
+# On each tick the handler @0x80031ed0.. (1) sets the red screen-damage flash DAT_801b2658 = 0x960,
+# (2) sets DAT_801b265a = 0x3c, (3) calls FUN_8002a6a0(-1) to drain 1 HP. At 60 fps the handler runs
+# 4x as often as the 15 fps original, so poison drains ~4x too fast and the mist (which FORCES the
+# timer to a multiple of 30 every frame -> a tick every call) drains far too fast as well.
+# Live-probed (PCSX write-bp + RAM timeline): DAT_801b2658 IS the general "took damage" red flash
+# (melee sets it too, @0x8002a8cc; fade @0x80030ef8 is only -12/frame). Naively gating just the drain
+# (v43) left the flash firing every tick -> "4 red blinks per 1 HP" of poison.
+# Fix: redirect the tick body to a cave that ÷N-gates the FLASH (0x2658) and the DRAIN together, so
+# poison gives exactly one blink per HP drained, while the mist -- which re-enters the tick every
+# frame -- still re-pegs 0x2658 every Nth frame (the -12/frame fade barely dips it) and stays solid
+# red, just draining ÷N slower. DAT_801b265a is kept set every tick (unchanged poison behaviour).
+#   @0x80031ed8: lui at,0x801b           -> j POISON_CAVE  (redirect the tick body)
+#   @0x80031edc: sh v0,0x2658(at) [flash]-> nop            (flash now owned by the gated cave)
+# The bne @0x80031ed0 still skips the whole body on non-tick calls, so the cave only runs on a tick.
+POISON_SIG = bytes.fromhex(
+    "08004014""60090234""1b80013c""582622a4""3c000234""1b80013c""5a2622a4")  # @0x80031ed0
+POISON_REDIR_OFF = 0x08             # the `lui at,0x801b` @0x80031ed8 -> j cave
+POISON_REDIR_OLD = "1b80013c"
+POISON_FLASH_OFF = 0x0c             # the flash store `sh v0,0x2658(at)` @0x80031edc -> nop
+POISON_FLASH_OLD = "582622a4"
+POISON_JMP = 0x0801fc08             # j 0x8007f020
+POISON_CAVE_VADDR = 0x8007f020      # in the SAME proven-loaded padding run (0x8007ef7d, 691 bytes)
+#   that already holds the working enemy (0x8007ef80) + attack (0x8007efc0) caves -- i.e. real
+#   inter-function padding, NOT a runtime data buffer. (The earlier 0x80081c80 pick was a 1943-byte
+#   mid-text zero-run that the game uses as a scratch buffer; placing code there got clobbered at
+#   runtime and froze the game the instant a tick fired.) Cave is 18 words; the 1-byte ÷N counter
+#   lives at cave+0x48 (0x8007f068, GATE), addressed as lui 0x8008 / off -3992 (0xf068).
+#   Layout (the nop after lbu fills the R3000 LOAD-DELAY slot -- without it `addiu v0,v0,1` would
+#   read the stale v0 from `ori v0,0x3c`, the counter would never advance, and the drain never fire):
+#     lui at,0x801b / ori v0,0x3c / sh v0,0x265a(at)         ; always refresh 0x265a
+#     lui at,0x8008 / lbu v0,-3992(at) / nop / addiu v0,1 / andi v0,v0,N-1 / sb v0,-3992(at)
+#     bne v0,zero,SKIP / nop                                  ; only every Nth tick falls through
+#     lui at,0x801b / ori v0,0x960 / sh v0,0x2658(at)        ; flash = 0x960 (gated)
+#     jal 0x8002a6a0 / addiu a0,zero,-1                       ; drain -1 (gated; returns to SKIP)
+#  SKIP: j 0x80031ef4 / nop                                   ; rejoin (timer decrement + tail)
+POISON_CAVE = {
+    "quarter": [0x3c01801b, 0x3402003c, 0xa422265a, 0x3c018008, 0x9022f068, 0x00000000,
+                0x24420001, 0x30420003, 0xa022f068, 0x14400006, 0x00000000, 0x3c01801b,
+                0x34020960, 0xa4222658, 0x0c00a9a8, 0x2404ffff, 0x0800c7bd, 0x00000000],  # &3 ÷4
+    "half":    [0x3c01801b, 0x3402003c, 0xa422265a, 0x3c018008, 0x9022f068, 0x00000000,
+                0x24420001, 0x30420001, 0xa022f068, 0x14400006, 0x00000000, 0x3c01801b,
+                0x34020960, 0xa4222658, 0x0c00a9a8, 0x2404ffff, 0x0800c7bd, 0x00000000],  # &1 ÷2
 }
 
 # --- FIELD OF VIEW (custom, optional --fov) -- the GTE projection distance H (cop2 ctrl reg 26)
@@ -636,6 +682,23 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
            WATERSCROLL_JMP, WATERSCROLL_CAVE_VADDR, WATERSCROLL_CAVE[mode])
     inject("dropedge", DROPEDGE_SIG, DROPEDGE_OFF, DROPEDGE_OLD, DROPEDGE_JMP, DROPEDGE_CAVE_VADDR,
            DROPEDGE_CAVE[mode])
+
+    # POISON / MIST: redirect the status tick body (0x80031ed8) to a ÷N gate cave AND nop the in-line
+    # flash store (0x80031edc) so flash + drain are gated together -> 1 blink per HP, mist stays red.
+    pi = find_once(data, POISON_SIG, "poison")
+    assert data[pi + POISON_REDIR_OFF:pi + POISON_REDIR_OFF + 4] == bytes.fromhex(POISON_REDIR_OLD), \
+        "poison redirect byte mismatch"
+    assert data[pi + POISON_FLASH_OFF:pi + POISON_FLASH_OFF + 4] == bytes.fromhex(POISON_FLASH_OLD), \
+        "poison flash byte mismatch"
+    pcbin = base + _bin_off(_file_off(POISON_CAVE_VADDR))
+    assert all(x == 0 for x in data[pcbin:pcbin + 4 * len(POISON_CAVE[mode]) + 4]), \
+        "poison cave region not free"   # +4 covers the ÷N counter byte at cave+0x44
+    data[pi + POISON_REDIR_OFF:pi + POISON_REDIR_OFF + 4] = POISON_JMP.to_bytes(4, "little")
+    data[pi + POISON_FLASH_OFF:pi + POISON_FLASH_OFF + 4] = (0).to_bytes(4, "little")
+    for k, word in enumerate(POISON_CAVE[mode]):
+        data[pcbin + 4 * k:pcbin + 4 * k + 4] = word.to_bytes(4, "little")
+    print("POISON     @0x%X redirect + flash nop -> cave @bin0x%X (vaddr 0x%X)  drain+flash /%d" % (
+        pi + POISON_REDIR_OFF, pcbin, POISON_CAVE_VADDR, 4 if mode == "quarter" else 2))
 
     # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
     # (both sites still original at find time), then both edits applied -- so no re-find needed.
