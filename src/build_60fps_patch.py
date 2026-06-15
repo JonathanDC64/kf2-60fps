@@ -79,6 +79,45 @@ WALK_SIG = bytes.fromhex(
 WALK_OFF = (4, 0x34)
 WALK_NEW = {"half": 0x43, "quarter": 0x83}
 
+# --- WALK GATE: gate the player POSITION COMMIT to every Nth frame (slope-safe; v1.5.0). ---
+# The sra-quarter shrinks every step 4x; the steep "floorless" slope needs a full-size step to land on
+# the ground above, so quartering makes it unclimbable (RESEARCH §17). Gating the MAGNITUDE failed too:
+# the engine needs the move input present each frame to sustain a walking velocity/state, so zeroing it
+# on 3/4 frames makes the game think you keep stopping (burst test: only CONSECUTIVE move-frames move).
+# Fix: leave the magnitude FULL every frame (walk-state alive, full step computed -> collision/incline
+# clears the slope), and gate only the final POSITION WRITE so the player advances every Nth frame.
+# player_move commits posX/posZ at 0x8002e580/0x8002e588 (D_801B25F0/25F8, shared %hi 0x801B). Hook the
+# preceding `sw t1,0x60(sp)` @0x8002e578 -> cave that increments a counter and does both writes only on
+# the beat, then rejoins at 0x8002e58c (skipping the original two writes). Average speed = stock; each
+# committed move is a full step (clears the slope); animation/velocity run every frame.
+WALK_GATE_SIG = bytes.fromhex("01000934" "6000a9af" "1b80013c" "f02522ac")  # ori t1,1 / sw t1,0x60(sp) / lui at / sw v0,25F0
+WALK_GATE_OFF = 4                  # the `sw $t1,0x60($sp)` (6000a9af) within the sig
+WALK_GATE_OLD = "6000a9af"
+WALK_GATE_VADDR = 0x8007F070       # proven code-padding (v53 ran code here; adjacent to poison cave)
+WALK_GATE_COUNTER = 0x8007F068     # poison's PROVEN-persistent byte (burst test confirmed it cycles).
+                                   # Shared w/ poison only while poisoned (negligible timing nudge).
+WALK_GATE_JMP = 0x0801FC1C         # j 0x8007F070  (replaces the sw t1 @0x8002e578)
+
+def _walk_gate_cave(mode):
+    A = WALK_GATE_COUNTER
+    hi = (A + 0x8000) >> 16 & 0xFFFF       # %hi/%lo with sign-extension correction
+    lo = A & 0xFFFF
+    nmask = (4 if mode == "quarter" else 2) - 1
+    return [
+        0x3C010000 | hi,      # lui   $at, %hi(counter)
+        0x90280000 | lo,      # lbu   $t0, %lo(counter)($at)
+        0xAFA90060,           # sw    $t1, 0x60($sp)        (displaced original; fills lbu load-delay)
+        0x25080001,           # addiu $t0, $t0, 1
+        0xA0280000 | lo,      # sb    $t0, %lo(counter)($at)
+        0x31080000 | nmask,   # andi  $t0, $t0, N-1
+        0x15000003,           # bne   $t0, $zero, SKIP      (off-beat -> skip the commit)
+        0x3C01801B,           # lui   $at, 0x801B           (branch delay; base for both pos writes)
+        0xAC2225F0,           # sw    $v0, 0x25F0($at)      (commit posX = D_801B25F0)
+        0xAC2325F8,           # sw    $v1, 0x25F8($at)      (commit posZ = D_801B25F8)
+        0x0800B963,           # SKIP: j 0x8002E58C          (rejoin after the original two writes)
+        0x00000000,           # nop                         (jump delay)
+    ]
+
 # --- TURN: turn-max base (FUN_80030fcc): `ori v0,zero,0x20` / `,0x28`. ---
 TURN_SIG = bytes.fromhex(
     "c8000234""1b80013c""642622ac""20000234""1b80013c""682622ac"
@@ -624,15 +663,21 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
         print("BOB        @0x%X  head-bob phase /%d (correct-speed bob)" % (
             bf, 4 if mode == "quarter" else 2))
 
-    if not __import__("os").environ.get("KF2_SKIP_WALK"):
+    # WALK: DEFAULT = sra-quarter (stable v1.4.0 behavior; correct speed, but the steep slope can't be
+    # climbed -- RESEARCH §17). KF2_WALK_GATE = EXPERIMENTAL commit-gate (does NOT work -- the move
+    # resolution is too intertwined to gate cleanly; see §17.6). KF2_SKIP_WALK = leave 60fps full speed.
+    _env = __import__("os").environ
+    if _env.get("KF2_SKIP_WALK"):
+        print("WALK       SKIPPED (KF2_SKIP_WALK set) -- A/B slope test")
+    elif _env.get("KF2_WALK_GATE"):
+        pass  # experimental commit-gate installed in the cave-injection block below (needs `base`)
+    else:
         w = find_once(data, WALK_SIG, "walk")
         for off in WALK_OFF:
             assert data[w + off] == 0x03, "walk byte mismatch"
             data[w + off] = WALK_NEW[mode]
-        print("WALK       @0x%X,0x%X  sra ->0x%02x" % (
+        print("WALK       @0x%X,0x%X  sra ->0x%02x (quarter; slope unclimbable -- RESEARCH 17)" % (
             w + WALK_OFF[0], w + WALK_OFF[1], WALK_NEW[mode]))
-    else:
-        print("WALK       SKIPPED (KF2_SKIP_WALK set) -- A/B slope test")
 
     t = find_once(data, TURN_SIG, "turn")
     assert data[t + TURN_OFF20] == 0x20 and data[t + TURN_OFF28] == 0x28, "turn byte mismatch"
@@ -655,6 +700,24 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
         "enemy move byte mismatch"
     base = je - _bin_off(_file_off(ENEMY_JSIG_VADDR))
     assert data[base:base + 8] == b"PS-X EXE", "GAME.EXE anchor mismatch (0x%X)" % base
+
+    # WALK GATE (EXPERIMENTAL, off by default -- KF2_WALK_GATE): commit-gate that does NOT work; the
+    # move resolution is too intertwined to gate cleanly (RESEARCH §17.6). Kept for reference only.
+    if _env.get("KF2_WALK_GATE"):
+        g = find_once(data, WALK_GATE_SIG, "walk_gate")
+        assert data[g + WALK_GATE_OFF:g + WALK_GATE_OFF + 4] == bytes.fromhex(WALK_GATE_OLD), \
+            "walk gate byte mismatch"
+        gcbin = base + _bin_off(_file_off(WALK_GATE_VADDR))
+        words = _walk_gate_cave(mode)
+        assert all(x == 0 for x in data[gcbin:gcbin + 4 * len(words)]), \
+            "walk gate cave region not free"
+        ctr_bin = base + _bin_off(_file_off(WALK_GATE_COUNTER))
+        assert data[ctr_bin] == 0, "walk gate counter byte not free (0x%X)" % WALK_GATE_COUNTER
+        data[g + WALK_GATE_OFF:g + WALK_GATE_OFF + 4] = WALK_GATE_JMP.to_bytes(4, "little")
+        for k, word in enumerate(words):
+            data[gcbin + 4 * k:gcbin + 4 * k + 4] = word.to_bytes(4, "little")
+        print("WALK-GATE  @0x%X -> full step every %d frames (slope-safe); cave @bin0x%X (vaddr 0x%X)" % (
+            g + WALK_GATE_OFF, 4 if mode == "quarter" else 2, gcbin, WALK_GATE_VADDR))
 
     def inject(name, sig, patch_off, old_hex, jmp, cave_vaddr, cave_words):
         idx = find_once(data, sig, name)

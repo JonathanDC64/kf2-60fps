@@ -974,3 +974,29 @@ walking) or going frame-rate-independent (delta-time), which binary caves can't 
 Deferred for binary patching. This is a prime motivator for the **decomp/delta-time** path (a readable
 move function makes a sub-stepped or threshold-scaled climb trivial and testable). Debug A/B env
 toggles added to `build_60fps_patch.py`: `KF2_SKIP_WALK`, `KF2_SKIP_GRAV` (default off = patch applied).
+
+### 17.6 Frame-gate attempts (v52–v58) — CONFIRMED unpatchable; the move resolution is intertwined
+Idea: instead of shrinking the per-frame step (which kills the slope), keep the FULL step and only let
+the player advance every Nth frame ("gate"), so average speed is correct and the full step clears the
+slope. Implemented as a code-cave + a free-padding frame counter. Findings, in order:
+- **Cave location matters at runtime, not just in the file.** First cave at 0x8009AF90 (a large file-zero
+  run near the EXE end) froze on entering gameplay — that region is runtime BSS/scratch the game
+  overwrites. Moving the cave into proven inter-function code padding (0x8007F070, by the poison cave)
+  fixed the freeze. (Same lesson as the original poison cave: file-zero ≠ runtime-free.)
+- **Counter persistence:** a free-padding counter byte must be in *runtime-stable* padding. The burst
+  diagnostic (move only while counter bit5 set) proved the counter at poison's proven byte (0x8007F068)
+  cycles correctly.
+- **Gating the move MAGNITUDE (sp+0x28) fails:** zeroing it on off-beat frames made the player unmovable.
+  The burst test was decisive — only *consecutive* move-frames move; isolated 1-in-4 frames don't. The
+  engine needs the move input present each frame to sustain a walking velocity/state, so intermittent
+  zeroing reads as "kept stopping."
+- **Gating the position COMMIT (0x8002e580/88), magnitude full, also fails:** still unmovable. Position is
+  written/read at *multiple coupled sites* — the early step-add (0x8002e498), the incline-projection
+  retry loop, AND a second path at 0x8002eb04 — not one clean commit. Throttling any single site
+  desyncs the others.
+**Conclusion:** §17.4 is confirmed empirically. There is no single chokepoint; velocity/walk-state, the
+incline loop, and several position read/write sites are coupled across frames. A clean fix requires
+restructuring the move as a unit (sub-step or framerate-scale it) — i.e. the **decomp**, built
+**shiftable/relinkable** (full symbolization + slinky) so functional C can replace player_move at any
+size without the matching compiler. The cave code is kept behind `KF2_WALK_GATE` (off by default;
+default is the stable sra-quarter) for reference only.
