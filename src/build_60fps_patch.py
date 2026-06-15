@@ -624,12 +624,15 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
         print("BOB        @0x%X  head-bob phase /%d (correct-speed bob)" % (
             bf, 4 if mode == "quarter" else 2))
 
-    w = find_once(data, WALK_SIG, "walk")
-    for off in WALK_OFF:
-        assert data[w + off] == 0x03, "walk byte mismatch"
-        data[w + off] = WALK_NEW[mode]
-    print("WALK       @0x%X,0x%X  sra ->0x%02x" % (
-        w + WALK_OFF[0], w + WALK_OFF[1], WALK_NEW[mode]))
+    if not __import__("os").environ.get("KF2_SKIP_WALK"):
+        w = find_once(data, WALK_SIG, "walk")
+        for off in WALK_OFF:
+            assert data[w + off] == 0x03, "walk byte mismatch"
+            data[w + off] = WALK_NEW[mode]
+        print("WALK       @0x%X,0x%X  sra ->0x%02x" % (
+            w + WALK_OFF[0], w + WALK_OFF[1], WALK_NEW[mode]))
+    else:
+        print("WALK       SKIPPED (KF2_SKIP_WALK set) -- A/B slope test")
 
     t = find_once(data, TURN_SIG, "turn")
     assert data[t + TURN_OFF20] == 0x20 and data[t + TURN_OFF28] == 0x28, "turn byte mismatch"
@@ -702,18 +705,22 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
 
     # GRAVITY: redirect the velocity load to a >>k cave AND divide the accel immediate. Found once
     # (both sites still original at find time), then both edits applied -- so no re-find needed.
-    gi = find_once(data, GRAV_SIG, "gravity")
-    assert data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] == bytes.fromhex(GRAV_REDIR_OLD), \
-        "gravity redirect byte mismatch"
-    assert data[gi + GRAV_INC_OFF] == 0x28, "gravity accel byte mismatch"
-    gcbin = base + _bin_off(_file_off(GRAV_CAVE_VADDR))
-    assert all(x == 0 for x in data[gcbin:gcbin + 4 * len(GRAV_CAVE[mode])]), "gravity cave not free"
-    data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] = GRAV_JMP.to_bytes(4, "little")
-    data[gi + GRAV_INC_OFF] = GRAV_INC_NEW[mode]
-    for k, word in enumerate(GRAV_CAVE[mode]):
-        data[gcbin + 4 * k:gcbin + 4 * k + 4] = word.to_bytes(4, "little")
-    print("GRAVITY    @0x%X redirect + accel 0x28->0x%02x -> cave @bin0x%X (vaddr 0x%X)" % (
-        gi + GRAV_REDIR_OFF, GRAV_INC_NEW[mode], gcbin, GRAV_CAVE_VADDR))
+    # KF2_SKIP_GRAV env var disables this patch (A/B test for the steep-slope regression).
+    if not __import__("os").environ.get("KF2_SKIP_GRAV"):
+        gi = find_once(data, GRAV_SIG, "gravity")
+        assert data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] == bytes.fromhex(GRAV_REDIR_OLD), \
+            "gravity redirect byte mismatch"
+        assert data[gi + GRAV_INC_OFF] == 0x28, "gravity accel byte mismatch"
+        gcbin = base + _bin_off(_file_off(GRAV_CAVE_VADDR))
+        assert all(x == 0 for x in data[gcbin:gcbin + 4 * len(GRAV_CAVE[mode])]), "gravity cave not free"
+        data[gi + GRAV_REDIR_OFF:gi + GRAV_REDIR_OFF + 4] = GRAV_JMP.to_bytes(4, "little")
+        data[gi + GRAV_INC_OFF] = GRAV_INC_NEW[mode]
+        for k, word in enumerate(GRAV_CAVE[mode]):
+            data[gcbin + 4 * k:gcbin + 4 * k + 4] = word.to_bytes(4, "little")
+        print("GRAVITY    @0x%X redirect + accel 0x28->0x%02x -> cave @bin0x%X (vaddr 0x%X)" % (
+            gi + GRAV_REDIR_OFF, GRAV_INC_NEW[mode], gcbin, GRAV_CAVE_VADDR))
+    else:
+        print("GRAVITY    SKIPPED (KF2_SKIP_GRAV set) -- A/B slope test")
 
     ea = find_once(data, ENEMYANIM_SIG, "enemyanim")
     assert data[ea + ENEMYANIM_OFF:ea + ENEMYANIM_OFF + 4] == bytes(4), "enemyanim byte mismatch"

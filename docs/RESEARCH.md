@@ -929,3 +929,48 @@ Probe scripts (PCSX-Redux LuaJIT, in `KF2Recomp/`): `trace_state.lua` (HP-trigge
 writes `trace_out.txt`), `flash_writers.lua` (write-bp census → `flash_writers.txt`),
 `cave_probe.lua` (exec-bp counts of cave entry vs. drain + live counter). Offsets verified against the
 real dump with throwaway scripts that reuse the build's `_file_off`/`_bin_off` math before editing.
+
+## 17. Steep-slope climb regression (WALK ÷N) — diagnosed, NOT safely fixable by patching
+
+Reported: after the speed patches you can no longer climb certain steep slopes (you get stuck).
+Stock SLUS-00255 lets you climb this slope only while **holding run** — walking can't. Patched, even
+running can't.
+
+### 17.1 A/B isolation (decisive)
+- v48 (gravity patch DISABLED) — still can't climb → **not gravity** (falls fast, irrelevant).
+- v49 (WALK patch DISABLED, gravity normal) — **climbs fine** (movement is ~4× too fast, expected).
+- => the **WALK ÷N is the cause.** `WALK` raises the move-step shift `sra v0,0xc → 0xe` so the
+  per-frame forward step is ÷4. The slope is a near-vertical/“floorless” face you can only clear by a
+  per-frame step large enough to land on the walkable ground above it (that's why stock needs RUN).
+  ÷4 shrinks every step below that threshold, so even run can't clear it.
+
+### 17.2 Move/collision map (FUN_8002e3f8, player move)
+- `0x8002e448 sra s4,v0,0xc` / `0x8002e478 sra s2,v0,0xc` = per-frame step X/Z (the WALK patch sites).
+- `0x8002e498 addu v0,s4,posX` / `..s2,posZ` → proposed pos; saved sp+0x18/0x20.
+- `0x8002e4c0 jal 0x80033f38` = collision; result mask in **s5** (`0x8002e4c8 addu s5,v0`).
+- `0x8002e4cc bne s5,zero,0x8002e59c` = blocked branch. s5==0 → success path (`0x8002e4d4`..),
+  which includes an **incline-projection retry loop** (`[0x801e6498] >= 0x40` → adjust step by trig,
+  loop once via `0x8002e480`); commit at `0x8002e564` writes posX/posZ `0x801b25f0/25f8`.
+- collision FUN_80033f38 uses a **2048-unit grid** (`sra ...,11`; cell table `0x801d4464`) and calls
+  object-collision sub-fns `0x8004d644` / `0x8004d838` (iterate actor array `0x80185da8`).
+
+### 17.3 s5 block-mask flags (read live in DuckStation)
+- `s5==0` clear · `s5==0x4` blocked (collision, NOT wall) · `s5==0x5` solid wall (bit0x1 = wall)
+  · `s5==0x20` seen at the slide handler too (tree/object). **`0x4` is NOT slope-specific** — walls
+  and trees also produce it. The slide handler `0x8002e604` fires for **walls/trees, not the slope**;
+  the slope is resolved in the incline-projection loop, intertwined with general terrain handling.
+
+### 17.4 Why no safe patch hook (v50 failure recorded)
+Attempt v50: redirect `0x8002e4cc` to a cave that, on `s5==4`, rebuilds the proposed pos with the
+**full** step (`step<<2`), re-runs collision, and commits. Result: **teleporting / falling through
+the world** — because (a) `s5==4` fires on ordinary terrain interaction (steps up/down, walls, trees),
+not just the steep slope, so it full-stepped everywhere; and (b) jumping straight to the commit
+skipped the success-path setup → garbage positions. There is **no clean, slope-specific flag**; the
+"stuck on a climbable face" state is a *failure of the whole move-resolution loop*, not a single bit.
+A correct fix means restructuring core movement (high risk — `0x80033f38`/incline loop touch all
+walking) or going frame-rate-independent (delta-time), which binary caves can't cleanly do.
+
+### 17.5 Status
+Deferred for binary patching. This is a prime motivator for the **decomp/delta-time** path (a readable
+move function makes a sub-stepped or threshold-scaled climb trivial and testable). Debug A/B env
+toggles added to `build_60fps_patch.py`: `KF2_SKIP_WALK`, `KF2_SKIP_GRAV` (default off = patch applied).
