@@ -1000,3 +1000,78 @@ restructuring the move as a unit (sub-step or framerate-scale it) — i.e. the *
 **shiftable/relinkable** (full symbolization + slinky) so functional C can replace player_move at any
 size without the matching compiler. The cave code is kept behind `KF2_WALK_GATE` (off by default;
 default is the stable sra-quarter) for reference only.
+
+## 18. Enemy melee damage 4× too high at 60 fps (NEW — call chain mapped via recompiled C)
+
+Reported: enemies deal ~4× damage at 60 fps. Mapped end-to-end against the full recompiled C of
+GAME.EXE (`psxrecomp/kf2/generated/GAME.EXE_full.c`, the readable decomp the §15/§17 Ghidra passes
+lacked). The damage pipeline is **two helpers + many enemy-AI call sites**:
+
+- **`FUN_8002a6f4` = apply-damage-to-player.** `0x8002A738 lhu v0,[player+0x24fc]` (HP, u16 @
+  `0x801b24fc`) → `0x8002A740 sub v0 = HP - a1` (a1/`gpr[5]` = damage) → clamps `<0` to 0 →
+  `0x8002A78C sh ...,0x24fc` writes HP. Pure "subtract a1 from HP," applied **once per call**.
+- **`FUN_8002ab18` = resolve-a-hit** (the only meaningful caller of `FUN_8002a6f4` for combat):
+  computes `damage = (hi>>2) - defense` then calls apply-damage. (`FUN_8002a6a0`, §16, is the
+  poison-only HP drain; `FUN_8002ed60`'s apply-damage call @`0x8002EFC4` is **fall damage**, already
+  covered by the gravity/velocity² work — leave it.)
+- **Hit is triggered from the enemy-AI functions**, not from a per-frame contact tick on the player:
+  `FUN_8004d254` (`0x8004D384`), `FUN_8004e330` (`0x8004E510`, `0x8004E6C8`), **`FUN_800500a8`**
+  (the big multi-enemy-type AI — `0x800514B8`/`0x800519C0`/`0x8005290C`/`0x80052A60`),
+  `FUN_800533e8` (`0x800534C0`), plus `FUN_8002b114` (`0x8002B2F8`). These live in the **same
+  `0x8004Dxxx–0x80053xxx` enemy-AI band as the existing ENEMY (`FUN_8004dbc8` @`0x8004DBC0`) and
+  ENEMYANIM (`FUN_8004db3c`) caves.**
+
+**Diagnosis.** Each hit subtracts a fixed `damage` **once**, so the 4× is **frequency, not magnitude**:
+the existing ENEMY cave ÷4s enemy *movement/step*, and ENEMYANIM ÷4s the *animation phase*, but the
+**attack-state machine that fires the hit is not frame-gated** — so at 60 fps an enemy reaches its
+attack/hit frame ~4× as often → 4× DPS. (Consistent with §6's "attack timing largely covered by
+animation" being **incomplete**: the visible swing is slowed, the damage trigger is not.)
+
+**Live confirmation (PCSX-Redux, `tools/redux_enemydmg.lua`).** Bp on `FUN_8002ab18` (hit) +
+`FUN_8002a6f4` (apply) + the per-frame `0x80019614` (timeline). One enemy swing produced **4 APPLY
+events on 4 consecutive frames** (f=473–476, gap=1), each subtracting a **full 14 HP** (50→36→22→8),
+caller `ra=0x8004D388` (`FUN_8004d254`). So per-hit damage is correct and native 30 fps delivers 1
+hit — the bug is purely **frequency** (`applies/swing = 4.00`). This rules out a magnitude bug and
+rules out the ¼-damage-scale fix (14→3 would lose 14 % and zero-out weak enemies).
+
+**The fix (v1.5.0 / shipped, live-confirmed).** Redirect the **entry** of `FUN_8002ab18`
+(`0x8002AB18`, `addiu sp,-0x78`) to a cave that runs a ÷N counter and lets only **every Nth call**
+through (the 4th runs the displaced `addiu` in the jump delay slot and resumes at `0x8002AB1C`); the
+other N−1 return immediately with `v0=0` ("no hit"). Result: exactly **one** full-damage hit per
+swing, and because the apply/flash/knockback all live *inside* the gated function, they fire once per
+hit too (no §16-style multi-blink). `v0/v1` are scratch at entry (the function re-sets them before
+use) and the entry `jal`-set `ra` survives the `j`-to-cave, so the no-op return is clean. Cave at
+`ENEMYDMG_CAVE_VADDR = 0x8007F0C0` — the same proven inter-function padding run as the poison/enemy
+caves, placed clear of POISON (`..0x8007F069`) and the reserved WALK_GATE (`0x8007F070..0x8007F0A0`)
+and **within a single MODE2/2352 sector** (caves must not straddle the 2048-byte seam at `0x8007F000`
+— the first pick `0x8007EFE0` crossed it and broke the contiguous `.bin` write/check). 1-byte ÷N
+counter at cave+0x30 (`0x8007F0F0`). A/B toggle: `KF2_SKIP_ENEMYDMG=1`.
+
+**Surgical-by-construction.** `FUN_8002ab18` writes **only** player HP (`0x801b24fc`); fall damage
+(`FUN_8002ed60`→`FUN_8002a6f4` direct) and poison (`FUN_8002a6a0`) take different paths, so gating it
+touches enemy-inflicted melee/contact damage only. Caveat: the gate assumes a ~4-frame swing window
+(true for the tested enemy); an enemy with a markedly different window would gate slightly off — if a
+report surfaces, re-probe `applies/swing` and adjust. Probe: `tools/redux_enemydmg.lua`.
+
+## 19. Recompiled-C re-examination of slopes (§17) & projectiles (§15) — 2026-06-17
+
+Re-walked both "deferred" items against the full recompiled C (not available to the original Ghidra
+passes). Net: **projectiles stay deferred; slopes gain one genuinely untried, slope-specific hook.**
+
+- **Projectiles (§15): re-confirmed deferred.** `FUN_800422c0` is still a per-frame orchestrator over a
+  fixed EXE particle ring with decay/phase math (`[gp+0xd8]>>6`), no linear-velocity constant. The
+  recompiled C adds no new flat `pos += vel` site. No safe particle-global or projectile-specific knob.
+- **Slopes (§17): recompiled C reveals step-shift sites the WALK patch never touched.** `FUN_8002e3f8`
+  has the documented initial step shifts at `0x8002E448`/`0x8002E478` (`>>12`, the WALK ÷4 sites), **but
+  also additional `>>12` shifts at `0x8002E530` and `0x8002E54C` inside the incline-reprojection path**
+  (reached after the `gpr[16]+=0x6498` incline-value load at `0x8002E4D8`, i.e. the steep-slope branch).
+  §17.4 gated on `s5==4` (not slope-specific) and §17.6 frame-gated (failed) — **neither scaled the
+  incline-reprojection shifts independently of the flat-ground shifts.** That separation is the fresh,
+  slope-specific lever: the incline branch is entered *only* when the terrain is steep enough, so
+  scaling `0x8002E530`/`0x8002E54C` differently from `0x8002E448`/`478` could keep flat-ground speed
+  ÷4 while preserving a climb-capable step on steep faces.
+  **Caveat / live test required:** §17.6's "move resolution is intertwined across coupled position
+  sites" still stands as the null hypothesis. Before investing, A/B in DuckStation: leave WALK ÷4 on
+  `0x8002E448`/`478` but keep `0x8002E530`/`54C` at `>>12` (full step on the incline retry) and test the
+  known steep slope. If it climbs without breaking flat-ground speed, this is the long-sought
+  slope-specific hook; if it teleports/desyncs like v50, §17.6 is confirmed and slopes await the decomp.

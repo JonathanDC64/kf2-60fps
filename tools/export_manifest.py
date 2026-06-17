@@ -131,6 +131,10 @@ def build():
     edit("dropedge", P.DROPEDGE_SIG, [], cave_obj={
         "patch_off": P.DROPEDGE_OFF, "old": P.DROPEDGE_OLD, "jmp": "%08x" % P.DROPEDGE_JMP,
         **cave(P.DROPEDGE_CAVE_VADDR, P.DROPEDGE_CAVE)})
+    # ENEMYDMG: ÷N frequency gate on the take-a-hit resolver entry (FUN_8002ab18) -- RESEARCH §18.
+    edit("enemydmg", P.ENEMYDMG_SIG, [], cave_obj={
+        "patch_off": P.ENEMYDMG_PATCH_OFF, "old": P.ENEMYDMG_OLD, "jmp": "%08x" % P.ENEMYDMG_JMP,
+        **cave(P.ENEMYDMG_CAVE_VADDR, P.ENEMYDMG_CAVE)})
     # GRAVITY: accel byte edit + redirect-to-cave (one signature).
     edit("gravity", P.GRAV_SIG,
          [{"off": P.GRAV_INC_OFF, "w": 1, "old": 0x28, "new": per_mode(P.GRAV_INC_NEW)}],

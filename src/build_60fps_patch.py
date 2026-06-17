@@ -36,7 +36,7 @@ import zlib
 
 # Patcher version (single source of truth -- exported to the manifest, shown on the CLI + web UI).
 # See CHANGELOG.md. Bump on every user-visible change.
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 # Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
 SRC_SERIAL = "SLUS-00255"
@@ -336,6 +336,42 @@ DROPEDGE_CAVE = {
                 0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,2
     "half":    [0x94890066, 0x94880018, 0x00094843, 0x01095023, 0x00a8582b,
                 0x00aa602b, 0x398c0001, 0x016c1024, 0x03e00008, 0x00000000],  # sra,1
+}
+
+# --- ENEMY MELEE DAMAGE 4x (frequency gate). RESEARCH §18. The player take-a-hit resolver
+# FUN_8002ab18 (damages player HP @0x801b24fc; computes (hi>>2)-defense, calls apply-damage
+# FUN_8002a6f4 which also sets the red flash @0x8002a8cc) is invoked from the enemy AI ONCE PER
+# FRAME while the enemy sits in its attack-active animation window. ENEMYANIM's ÷4 stretches that
+# (originally 1-frame) window to ~4 real frames at 60 fps -> 4 calls -> 4x damage (live-proven:
+# one swing = APPLY x4 on consecutive frames, HP 50->36->22->8, 14 dmg each; native 30 fps = 1 hit).
+# Per-hit damage is already correct, so we gate FREQUENCY not magnitude: redirect the function ENTRY
+# to a cave that runs a ÷N counter and lets only every Nth call through (running the displaced
+# `addiu sp,-0x78` in the jump delay slot, resuming at 0x8002ab1c); the other N-1 calls return
+# immediately with v0=0 ("no hit") -- which also gates the flash + knockback to once-per-swing.
+# Robust: FUN_8002ab18 damages ONLY the player and is NOT the fall-damage (FUN_8002ed60->FUN_8002a6f4
+# direct) or poison (FUN_8002a6a0) path, so the gate is surgical. v0/v1 are scratch at entry (the
+# function re-sets them before use); the entry jal-set ra is preserved through the j-to-cave.
+#   @0x8002ab18: addiu sp,sp,-0x78 (27bdff88) -> j 0x8007f0c0
+ENEMYDMG_SIG = bytes.fromhex(
+    "88ffbd27""8800a897""7000beaf""8c00be97""1b80023c""b4254290")  # @0x8002ab18
+ENEMYDMG_PATCH_OFF = 0x00            # the function entry `addiu sp,sp,-0x78` -> j cave
+ENEMYDMG_OLD = "88ffbd27"
+ENEMYDMG_JMP = 0x0801fc30            # j 0x8007f0c0
+ENEMYDMG_CAVE_VADDR = 0x8007f0c0     # proven padding run (0x8007ef7d..~0x8007f210); placed clear of the
+#   POISON cave (ends 0x8007f069) and the reserved WALK_GATE cave (0x8007f070..0x8007f0a0), and within a
+#   SINGLE MODE2/2352 sector (file 0x6e8c0..0x6e8f3 -- caves must not straddle the 2048-byte sector seam;
+#   the earlier 0x8007efe0 pick crossed the 0x8007f000 seam and broke the contiguous .bin write/check).
+#   Counter byte at cave+0x30 (0x8007f0f0), addressed lui 0x8008 / off 0xf0f0. 12 words + a zeroed counter.
+#     lui v1,0x8008 / lbu v0,0xf0f0(v1) / nop(LOAD DELAY) / addiu v0,1 / andi v0,N-1 / sb v0,0xf0f0(v1)
+#     beq v0,zero,PROCEED / nop / jr ra / move v0,zero(=no-hit return)  ; SKIP (N-1 of N calls)
+#  PROCEED: j 0x8002ab1c / addiu sp,sp,-0x78(displaced)                 ; every Nth call
+ENEMYDMG_CAVE = {
+    "quarter": [0x3C038008, 0x9062F0F0, 0x00000000, 0x24420001, 0x30420003, 0xA062F0F0,
+                0x10400003, 0x00000000, 0x03E00008, 0x00001021, 0x0800AAC7, 0x27BDFF88,
+                0x00000000],   # andi &3 ÷4
+    "half":    [0x3C038008, 0x9062F0F0, 0x00000000, 0x24420001, 0x30420001, 0xA062F0F0,
+                0x10400003, 0x00000000, 0x03E00008, 0x00001021, 0x0800AAC7, 0x27BDFF88,
+                0x00000000],   # andi &1 ÷2
 }
 
 # --- POISON / MIST drain + damage-flash sync (status handler FUN_80031e9c) ---
@@ -748,6 +784,14 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
            WATERSCROLL_JMP, WATERSCROLL_CAVE_VADDR, WATERSCROLL_CAVE[mode])
     inject("dropedge", DROPEDGE_SIG, DROPEDGE_OFF, DROPEDGE_OLD, DROPEDGE_JMP, DROPEDGE_CAVE_VADDR,
            DROPEDGE_CAVE[mode])
+
+    # ENEMY MELEE DAMAGE: ÷N frequency gate on the take-a-hit resolver entry (RESEARCH §18).
+    # KF2_SKIP_ENEMYDMG disables it (A/B test -- leave enemies at the 4x-too-fast hit cadence).
+    if _env.get("KF2_SKIP_ENEMYDMG"):
+        print("ENEMYDMG   SKIPPED (KF2_SKIP_ENEMYDMG set) -- A/B damage test")
+    else:
+        inject("enemydmg", ENEMYDMG_SIG, ENEMYDMG_PATCH_OFF, ENEMYDMG_OLD, ENEMYDMG_JMP,
+               ENEMYDMG_CAVE_VADDR, ENEMYDMG_CAVE[mode])
 
     # POISON / MIST: redirect the status tick body (0x80031ed8) to a ÷N gate cave AND nop the in-line
     # flash store (0x80031edc) so flash + drain are gated together -> 1 blink per HP, mist stays red.

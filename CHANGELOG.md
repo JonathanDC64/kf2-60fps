@@ -7,9 +7,22 @@ All notable changes to the King's Field II (USA) 60 FPS patcher. Format based on
 ## [Unreleased]
 - **Mist constant-drain**: the poison-mist field now drains ÷4 (good) but in short steps with
   brief gaps rather than the stock continuous drain — acceptable but not yet exact (see RESEARCH §16).
-- Player death animation, secret-door / key-use animation, and enemy hit-flash: under investigation.
+- Player death animation and secret-door / key-use animation: under investigation.
 - Projectile speed: **deferred** — pooled particle/effect system with no single position-mover
-  to scale safely (see RESEARCH §15).
+  to scale safely (see RESEARCH §15, §19).
+- Steep-slope climb: **deferred** for binary patching (intertwined move resolution); one untried
+  incline-reprojection hook identified for a future A/B test (see RESEARCH §17, §19).
+
+## [1.5.0] — 2026-06-17 — Enemy melee damage
+### Fixed
+- **Enemies dealt ~4× damage at 60 fps.** The player take-a-hit resolver (`FUN_8002ab18`, which
+  subtracts from HP `@0x801b24fc` and drives the red damage-flash) is invoked **once per frame**
+  while an enemy sits in its attack-active animation window; the ÷4 animation slow-down stretches
+  that (originally 1-frame) window across ~4 real frames, so the hit landed 4× (live-confirmed: one
+  swing = 4 hits × 14 HP). The function entry is now redirected to a code cave that ÷N-gates it, so
+  exactly **one** hit lands per swing (full per-hit damage preserved — not a lossy ¼-scale — so weak
+  enemies still hurt), and the flash/knockback fire once per hit too. The fall-damage
+  (`FUN_8002ed60`) and poison (`FUN_8002a6a0`) HP paths are separate and unaffected. (RESEARCH §18.)
 
 ## [1.4.0] — 2026-06-13 — Poison & damage-flash
 ### Fixed
@@ -76,7 +89,8 @@ fixed, so any sufficient emulator overclock gives the correct speed.
 ### Notes
 - Head-bob shipped **disabled** here as a stopgap (it ran too fast); fixed properly in 1.3.0.
 
-[Unreleased]: https://github.com/JonathanDC64/kf2-60fps/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/JonathanDC64/kf2-60fps/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.5.0
 [1.3.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.3.0
 [1.2.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.2.0
 [1.1.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.1.0

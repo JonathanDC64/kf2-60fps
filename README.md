@@ -5,7 +5,7 @@
 A patcher that makes **King's Field II (USA, SLUS-00255)** run at a smooth **60 FPS**
 while keeping the game playing at its original speed.
 
-Current version: **v1.3.0** (`python src/build_60fps_patch.py --version`) — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **v1.5.0** (`python src/build_60fps_patch.py --version`) — see [CHANGELOG.md](CHANGELOG.md).
 
 The original game runs its logic once per rendered frame and is hard-capped at ~15 FPS.
 If you simply uncap it (e.g. via emulator overclock), everything runs ~4× too fast. This
@@ -31,6 +31,7 @@ the cap).
 | Player swing animation | ÷4 (arc speed + hit-detection windows scaled together) |
 | Enemy + NPC animation | ÷4 (near **and** distant enemies + NPCs; walk/idle/attack) |
 | Enemy turning | ÷4 facing-slew (still faces you, just turns at the right speed) |
+| Enemy melee damage | ÷4 hit cadence — one full-damage hit per swing (the take-a-hit resolver was firing every frame of the attack window) |
 | Doors | open/close at the correct speed (full rotation over 4× the frames) |
 | Menus (inventory/shops) | capped at 60 FPS and cursor auto-repeat held at the right speed (taps stay instant) |
 | Gravity / falling | falls at the original speed (N² integration rescaled; fall damage preserved) |
