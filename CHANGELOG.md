@@ -10,8 +10,18 @@ All notable changes to the King's Field II (USA) 60 FPS patcher. Format based on
 - Player death animation and secret-door / key-use animation: under investigation.
 - Projectile speed: **deferred** — pooled particle/effect system with no single position-mover
   to scale safely (see RESEARCH §15, §19).
-- Steep-slope climb: **deferred** for binary patching (intertwined move resolution); one untried
-  incline-reprojection hook identified for a future A/B test (see RESEARCH §17, §19).
+
+## [1.6.0] — 2026-06-17 — Steep-slope climb
+### Fixed
+- **Steep slopes were unclimbable at 60 fps** (even running) — the regression that motivated the
+  decomp/delta-time effort. When a step lands on a steep incline (`[0x801E6498] ≥ 0x40`), the move
+  routine reprojects it by adding a fixed backward "anti-penetration" push (~−136 in Z); net climb
+  per frame = forward_step − push. The `walk` ÷4 shrank the **forward step** but left this **push at
+  full scale**, so `50 − 136 < 0` → the player slid back and oscillated in place. Fix: ÷N the two
+  reprojection shifts (`0x8002E530`/`0x8002E54C`) too, restoring proportionality — `50 − 34 = +16`/frame,
+  i.e. climbs at the correct speed (16 × 4 = 64 = stock). Only fires on steep inclines, so flat ground,
+  gentle slopes, and walls are unaffected. Live-traced with `tools/redux_slopeprobe.lua`; this corrects
+  the earlier "needs the decomp" verdict — it was a two-byte edit all along. (RESEARCH §17.7.)
 
 ## [1.5.0] — 2026-06-17 — Enemy melee damage
 ### Fixed
@@ -89,7 +99,8 @@ fixed, so any sufficient emulator overclock gives the correct speed.
 ### Notes
 - Head-bob shipped **disabled** here as a stopgap (it ran too fast); fixed properly in 1.3.0.
 
-[Unreleased]: https://github.com/JonathanDC64/kf2-60fps/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/JonathanDC64/kf2-60fps/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.6.0
 [1.5.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.5.0
 [1.3.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.3.0
 [1.2.0]: https://github.com/JonathanDC64/kf2-60fps/releases/tag/v1.2.0

@@ -64,6 +64,9 @@ def build():
                             for o in P.CAP_OFF])
     edit("walk", P.WALK_SIG, [{"off": o, "w": 1, "old": 0x03, "new": per_mode(P.WALK_NEW)}
                               for o in P.WALK_OFF])
+    # SLOPE: ÷N the incline-reprojection push so steep slopes stay climbable at 60fps (RESEARCH §17).
+    edit("slope", P.SLOPE_SIG, [{"off": o, "w": 1, "old": P.SLOPE_OLD, "new": per_mode(P.SLOPE_NEW)}
+                                for o in P.SLOPE_OFF])
     edit("turn", P.TURN_SIG, [
         {"off": P.TURN_OFF20, "w": 1, "old": 0x20, "new": per_mode(P.TURN_NEW20)},
         {"off": P.TURN_OFF28, "w": 1, "old": 0x28, "new": per_mode(P.TURN_NEW28)}])

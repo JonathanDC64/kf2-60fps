@@ -994,12 +994,35 @@ slope. Implemented as a code-cave + a free-padding frame counter. Findings, in o
   written/read at *multiple coupled sites* — the early step-add (0x8002e498), the incline-projection
   retry loop, AND a second path at 0x8002eb04 — not one clean commit. Throttling any single site
   desyncs the others.
-**Conclusion:** §17.4 is confirmed empirically. There is no single chokepoint; velocity/walk-state, the
-incline loop, and several position read/write sites are coupled across frames. A clean fix requires
-restructuring the move as a unit (sub-step or framerate-scale it) — i.e. the **decomp**, built
-**shiftable/relinkable** (full symbolization + slinky) so functional C can replace player_move at any
-size without the matching compiler. The cave code is kept behind `KF2_WALK_GATE` (off by default;
-default is the stable sra-quarter) for reference only.
+**Conclusion (SUPERSEDED — see §17.7).** §17.4/§17.6 concluded there was no single chokepoint and a
+fix needed the decomp. That was **wrong** — it stemmed from never tracing the move routine live with
+the recompiled C in hand. The real cause was much simpler (a missed proportional scale), found in §17.7.
+The `KF2_WALK_GATE` cave is kept (off by default) for reference only; it is not the fix.
+
+### 17.7 SOLVED (v1.6.0) — the incline reprojection push wasn't scaled with the walk step
+Re-traced the full move routine live (`tools/redux_slopeprobe.lua`) against the recompiled C
+(`func_8002E3F8`→`func_8002E480`→`func_8002E4DC`). What actually happens on the steep face:
+- When the proposed step lands on a steep incline, the collision sets an **incline metric `[0x801E6498]`**
+  (live value **136** on this slope; **0** on a plain wall, which instead gives `s5=0x5`). That metric
+  being `>= 0x40` triggers an **incline reprojection** (`block_8002E4F0..`): it computes a vector from
+  the incline (`sra s1,v0,0xc @0x8002E530`, `sra v0,v0,0xc @0x8002E54C`) and **adds it to the step**
+  (`@0x8002E558`), then re-runs collision. On this slope that vector is a fixed **−136 in Z** (a
+  "you can't penetrate, slide back" push).
+- **Net climb per frame = forward_step − 136.** Stock run: `200 − 136 = +64` → climbs. Stock walk:
+  `~120 − 136 < 0` → can't (that's why stock needs RUN). The probe confirmed it: full-speed (#3) climbs;
+  ÷4 walk (#1) gives `50 − 136 = −86` and **oscillates in place forever**.
+- **Root cause:** the WALK patch (§17.2) ÷4'd the FORWARD step (`0x8002E448/478`) but left the
+  reprojection push (`0x8002E530/54C`) at **full scale** — breaking the proportionality. The push is a
+  per-frame displacement and must scale with everything else.
+
+**The fix (SLOPE, shipped):** ÷N the two reprojection shifts too (`0x8002E530`/`0x8002E54C`,
+`>>0xc → >>0xe` quarter / `>>0xd` half — the *same* byte edit WALK uses, `0x03→0x83`/`0x43`). Now
+÷4 walk gives `50 − 34 = +16`/frame → climbs, and at the **correct speed** (16 × 4 frames = 64 =
+stock-per-frame; same wall-clock climb time, frame-rate-independent). The reprojection only runs when
+`[0x801E6498] >= 0x40`, so **flat ground, gentle slopes, and walls are untouched** (verified live:
+a wall gives `incl=0` and still blocks). Tied to WALK (full forward step needs the full push);
+`KF2_SKIP_SLOPE` leaves the push full for A/B. **Lesson:** the §17.6 "intertwined, needs decomp"
+verdict was a failure to instrument — one live trace of the move routine made the fix a two-byte edit.
 
 ## 18. Enemy melee damage 4× too high at 60 fps (NEW — call chain mapped via recompiled C)
 
@@ -1061,17 +1084,9 @@ passes). Net: **projectiles stay deferred; slopes gain one genuinely untried, sl
 - **Projectiles (§15): re-confirmed deferred.** `FUN_800422c0` is still a per-frame orchestrator over a
   fixed EXE particle ring with decay/phase math (`[gp+0xd8]>>6`), no linear-velocity constant. The
   recompiled C adds no new flat `pos += vel` site. No safe particle-global or projectile-specific knob.
-- **Slopes (§17): recompiled C reveals step-shift sites the WALK patch never touched.** `FUN_8002e3f8`
-  has the documented initial step shifts at `0x8002E448`/`0x8002E478` (`>>12`, the WALK ÷4 sites), **but
-  also additional `>>12` shifts at `0x8002E530` and `0x8002E54C` inside the incline-reprojection path**
-  (reached after the `gpr[16]+=0x6498` incline-value load at `0x8002E4D8`, i.e. the steep-slope branch).
-  §17.4 gated on `s5==4` (not slope-specific) and §17.6 frame-gated (failed) — **neither scaled the
-  incline-reprojection shifts independently of the flat-ground shifts.** That separation is the fresh,
-  slope-specific lever: the incline branch is entered *only* when the terrain is steep enough, so
-  scaling `0x8002E530`/`0x8002E54C` differently from `0x8002E448`/`478` could keep flat-ground speed
-  ÷4 while preserving a climb-capable step on steep faces.
-  **Caveat / live test required:** §17.6's "move resolution is intertwined across coupled position
-  sites" still stands as the null hypothesis. Before investing, A/B in DuckStation: leave WALK ÷4 on
-  `0x8002E448`/`478` but keep `0x8002E530`/`54C` at `>>12` (full step on the incline retry) and test the
-  known steep slope. If it climbs without breaking flat-ground speed, this is the long-sought
-  slope-specific hook; if it teleports/desyncs like v50, §17.6 is confirmed and slopes await the decomp.
+- **Slopes (§17): SOLVED — see §17.7.** The recompiled C surfaced extra `>>12` shifts at `0x8002E530`/
+  `0x8002E54C` in the incline-reprojection path that the WALK patch never touched. The original guess
+  here was to keep them at full scale; a live trace (`redux_slopeprobe.lua`) proved the **opposite** —
+  those shifts are a fixed backward "anti-penetration push" that must be **÷N'd to match** the ÷N
+  forward step, else the push (−136) overpowers the shrunken step (50) and the player slides back.
+  Fixed in v1.6.0 by ÷N-ing both shifts (the same byte edit as WALK). Full write-up in §17.7.

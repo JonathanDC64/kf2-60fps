@@ -50,6 +50,7 @@ SIGS = {
     "look_up": (0x2100, P.LOOK_UP_SIG), "look_dn": (0x2200, P.LOOK_DN_SIG),
     "poison": (0x2400, P.POISON_SIG),
     "enemydmg": (0x2500, P.ENEMYDMG_SIG),
+    "slope": (0x2600, P.SLOPE_SIG),
     "enemy": (ENEMY_OFF, P.ENEMY_JSIG),
 }
 

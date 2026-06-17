@@ -36,7 +36,7 @@ import zlib
 
 # Patcher version (single source of truth -- exported to the manifest, shown on the CLI + web UI).
 # See CHANGELOG.md. Bump on every user-visible change.
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 # Reference fingerprint of the known-good source (Redump "King's Field II (USA)", SLUS-00255).
 SRC_SERIAL = "SLUS-00255"
@@ -78,6 +78,23 @@ WALK_SIG = bytes.fromhex(
     "12100000""03930200")
 WALK_OFF = (4, 0x34)
 WALK_NEW = {"half": 0x43, "quarter": 0x83}
+
+# --- SLOPE: steep-slope climb fix (RESEARCH §17/§19). The move routine, when the proposed step lands
+# on a steep incline ([0x801E6498] >= 0x40, live-observed value 136), reprojects the step by ADDING a
+# fixed "anti-penetration" push computed from the incline -- a per-frame BACKWARD displacement (~-136
+# in Z) at `sra s1,v0,0xc` @0x8002e530 and `sra v0,v0,0xc` @0x8002e54c. Net climb/frame = forward_step
+# - push. The WALK ÷N shrank the FORWARD step (0x8002e448/478) but left this push at FULL scale, so at
+# 60fps walk gives 50-136 = -86 (slides back, can't climb -- even running, since run is also ÷4'd).
+# Fix: ÷N these two reproj shifts too (0x03->0x83/0x43, exactly like WALK), restoring proportionality:
+# 50-34 = +16/frame -> climbs at 1/4 rate (frame-rate-correct: 16*4 = 64 = stock). Only fires on steep
+# inclines (reproj is gated by [0x801E6498]>=0x40), so flat ground / walls / gentle slopes are untouched.
+# Live-proven (tools/redux_slopeprobe.lua): incl=136 on the slope (vs 0 on a wall, which gives s5=0x5).
+SLOPE_SIG = bytes.fromhex(
+    "23200400""00fc8424""12100000""31db010c""038b0200""0000038e"
+    "00000000""18004300""4000a98f""12100000""06002015""03130200")  # @0x8002e520
+SLOPE_OFF = (0x10, 0x2C)   # the sra-immediate low byte of the two incline-reproj shifts (0x530/0x54c)
+SLOPE_OLD = 0x03           # sra ...,0xc
+SLOPE_NEW = {"half": 0x43, "quarter": 0x83}   # sra ...,0xd / ...,0xe (matches WALK)
 
 # --- WALK GATE: gate the player POSITION COMMIT to every Nth frame (slope-safe; v1.5.0). ---
 # The sra-quarter shrinks every step 4x; the steep "floorless" slope needs a full-size step to land on
@@ -712,8 +729,20 @@ def apply_patches(data, mode, fov=None, cull=None, bob="on"):
         for off in WALK_OFF:
             assert data[w + off] == 0x03, "walk byte mismatch"
             data[w + off] = WALK_NEW[mode]
-        print("WALK       @0x%X,0x%X  sra ->0x%02x (quarter; slope unclimbable -- RESEARCH 17)" % (
-            w + WALK_OFF[0], w + WALK_OFF[1], WALK_NEW[mode]))
+        print("WALK       @0x%X,0x%X  sra ->0x%02x (forward step /%d)" % (
+            w + WALK_OFF[0], w + WALK_OFF[1], WALK_NEW[mode], 4 if mode == "quarter" else 2))
+        # SLOPE: ÷N the incline-reprojection push too, so it stays proportional to the ÷N forward step
+        # -> steep slopes become climbable again at the correct speed (RESEARCH §17/§19). Tied to WALK
+        # (full step needs full push); KF2_SKIP_SLOPE leaves the push full (A/B = the old stuck slope).
+        if __import__("os").environ.get("KF2_SKIP_SLOPE"):
+            print("SLOPE      SKIPPED (KF2_SKIP_SLOPE set) -- A/B: steep slope stays unclimbable")
+        else:
+            sl = find_once(data, SLOPE_SIG, "slope")
+            for off in SLOPE_OFF:
+                assert data[sl + off] == SLOPE_OLD, "slope byte mismatch"
+                data[sl + off] = SLOPE_NEW[mode]
+            print("SLOPE      @0x%X,0x%X  incline-reproj push ->0x%02x (steep slope climbable /%d)" % (
+                sl + SLOPE_OFF[0], sl + SLOPE_OFF[1], SLOPE_NEW[mode], 4 if mode == "quarter" else 2))
 
     t = find_once(data, TURN_SIG, "turn")
     assert data[t + TURN_OFF20] == 0x20 and data[t + TURN_OFF28] == 0x28, "turn byte mismatch"

@@ -5,7 +5,7 @@
 A patcher that makes **King's Field II (USA, SLUS-00255)** run at a smooth **60 FPS**
 while keeping the game playing at its original speed.
 
-Current version: **v1.5.0** (`python src/build_60fps_patch.py --version`) — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **v1.6.0** (`python src/build_60fps_patch.py --version`) — see [CHANGELOG.md](CHANGELOG.md).
 
 The original game runs its logic once per rendered frame and is hard-capped at ~15 FPS.
 If you simply uncap it (e.g. via emulator overclock), everything runs ~4× too fast. This
@@ -23,6 +23,7 @@ the cap).
 | --- | --- |
 | Frame cap | 15 FPS → **60 FPS** (`quarter`) or 30 FPS (`half`) |
 | Player walk / turn | scaled ÷4 (÷2 in half mode) |
+| Steep-slope climb | climbable again (the incline-reprojection push is scaled with the step, so steep faces clear at the correct speed) |
 | Vertical camera (look up/down) | pitch advance scaled ÷4 (÷2 in half mode) — turning/yaw already covered above |
 | Head-bob | walks at the original speed (phase scaled ÷4); `--bob off` disables it entirely |
 | Enemy movement | ÷4, with rounding so slow/diagonal enemies aren't starved |
